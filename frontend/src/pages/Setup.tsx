@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Check, Eye, EyeOff, Loader2, Mail, Send, ShieldCheck, Sparkles, UserPlus } from 'lucide-react'
 import { AuthLayout } from '@/components/AuthLayout'
@@ -30,7 +29,6 @@ function passwordIssues(pw: string): string[] {
 }
 
 export default function SetupPage() {
-  const navigate = useNavigate()
   const [step, setStep] = useState(0)
   const [state, setState] = useState<SetupState | null>(null)
   const [error, setError] = useState('')
@@ -63,12 +61,13 @@ export default function SetupPage() {
       .get<SetupState>('/api/setup/state')
       .then((s) => {
         setState(s)
-        if (s.installed) navigate('/', { replace: true })
+        if (s.installed) window.location.assign('/')
       })
       .catch(() => {
-        navigate('/', { replace: true })
+        // 404 = already installed
+        window.location.assign('/')
       })
-  }, [navigate])
+  }, [])
 
   const issues = useMemo(() => passwordIssues(password), [password])
   const pwStrength = 100 - issues.length * 20
@@ -143,7 +142,8 @@ export default function SetupPage() {
     setError('')
     try {
       await api.post('/api/setup/finish', { smtp: skipSmtp ? null : smtp })
-      navigate('/', { replace: true })
+      // Hard reload: InstallGate cached installed=false; cookies are set so /me works on reload.
+      window.location.assign('/')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed')
     } finally {

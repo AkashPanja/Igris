@@ -18,7 +18,7 @@ function Spinner() {
   )
 }
 
-/** Redirects to /setup when app is not installed (except on setup/auth pages that handle it). */
+/** Redirects to /setup when app is not installed. Re-checks health on route change. */
 function InstallGate({ children }: { children: ReactNode }) {
   const [installed, setInstalled] = useState<boolean | null>(null)
   const location = useLocation()
@@ -31,12 +31,12 @@ function InstallGate({ children }: { children: ReactNode }) {
         if (!cancelled) setInstalled(h.installed)
       })
       .catch(() => {
-        if (!cancelled) setInstalled(true) // assume installed on error to avoid loops
+        if (!cancelled) setInstalled(true)
       })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [location.pathname])
 
   if (installed === null) return <Spinner />
 
@@ -44,12 +44,11 @@ function InstallGate({ children }: { children: ReactNode }) {
   const onSetup = path === '/setup'
 
   if (!installed) {
-    // Not installed → force wizard. Allow /setup and reset-password (token may be valid from prior install edge).
     if (onSetup || path.startsWith('/reset-password')) return <>{children}</>
     return <Navigate to="/setup" replace />
   }
 
-  // Installed → /setup self-redirects inside SetupPage; block re-entry via route guard below.
+  // Installed → block /setup re-entry
   if (onSetup) return <Navigate to="/" replace />
 
   return <>{children}</>
