@@ -4,8 +4,8 @@
 
 **Sprint:** S1 — Foundation & Auth — **done** (2026-10-17)
 **Story:** none active
-**Next action:** commit + push S1 to GitHub; await S2 direction
+**Next action:** push commit `a14f17e` to GitHub; await S2 direction
 
-**Blockers:** none
+**Blockers:** none (push needs your GitHub credentials)
 
-**Last completed:** REQ-001, EP-001, US-001..US-008 (all done). 13 pytest pass. Frontend builds. Docker on port 4024.
+**Last completed:** REQ-001 / S1. 12 pytest pass. Frontend builds. Live on :4024. Commit `a14f17e` local only.

@@ -26,8 +26,9 @@ async def send_email(
     msg.set_content(body)
 
     pwd = decrypt(password_encrypted) if password_encrypted else ""
-    use_tls = security == "STARTTLS"
-    use_ssl = security == "SSL"
+    # aiosmtplib 5.x: use_tls = implicit TLS (SSL/SMTPS), start_tls = STARTTLS upgrade
+    use_tls = security == "SSL"
+    start_tls = security == "STARTTLS"
 
     await aiosmtplib.send(
         msg,
@@ -36,6 +37,6 @@ async def send_email(
         username=username or None,
         password=pwd or None,
         use_tls=use_tls,
-        use_ssl=use_ssl,
+        start_tls=start_tls,
         timeout=15,
     )

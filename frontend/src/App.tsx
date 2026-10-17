@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { useEffect, useState, type ReactNode } from 'react'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { SessionProvider, useSession } from '@/hooks/useSession'
 import { useTheme } from '@/hooks/useTheme'
+import { api } from '@/lib/api'
 import SetupPage from '@/pages/Setup'
 import LoginPage from '@/pages/Login'
 import ForgotPasswordPage from '@/pages/ForgotPassword'
@@ -15,6 +16,43 @@ function Spinner() {
       <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
     </div>
   )
+}
+
+/** Redirects to /setup when app is not installed (except on setup/auth pages that handle it). */
+function InstallGate({ children }: { children: ReactNode }) {
+  const [installed, setInstalled] = useState<boolean | null>(null)
+  const location = useLocation()
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<{ installed: boolean }>('/api/health')
+      .then((h) => {
+        if (!cancelled) setInstalled(h.installed)
+      })
+      .catch(() => {
+        if (!cancelled) setInstalled(true) // assume installed on error to avoid loops
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (installed === null) return <Spinner />
+
+  const path = location.pathname
+  const onSetup = path === '/setup'
+
+  if (!installed) {
+    // Not installed → force wizard. Allow /setup and reset-password (token may be valid from prior install edge).
+    if (onSetup || path.startsWith('/reset-password')) return <>{children}</>
+    return <Navigate to="/setup" replace />
+  }
+
+  // Installed → /setup self-redirects inside SetupPage; block re-entry via route guard below.
+  if (onSetup) return <Navigate to="/" replace />
+
+  return <>{children}</>
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -63,7 +101,9 @@ export default function App() {
   return (
     <SessionProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <InstallGate>
+          <AppRoutes />
+        </InstallGate>
       </BrowserRouter>
     </SessionProvider>
   )
