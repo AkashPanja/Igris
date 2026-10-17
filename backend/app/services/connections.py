@@ -58,9 +58,9 @@ PROVIDER_HELP = {
         "steps": [
             "Log in to groww.in → profile → Trading APIs, or open the Groww Cloud API Keys page",
             "Open the 'Generate API key' dropdown → choose 'Generate TOTP token', name it, Continue",
-            "Copy the TOTP Token shown (it is shown only once)",
-            "Scan the TOTP QR Code with Google Authenticator / Authenticator app (or copy the TOTP secret text)",
-            "Paste the TOTP Token below, then paste the QR code content or type the secret, and press Connect",
+            "Copy the TOTP Token shown (it is shown only once) and paste it below",
+            "The same screen shows a QR code only — there is NO secret text. Scan the QR with Google Authenticator / any authenticator app",
+            "Upload a screenshot of that QR below (or paste the otpauth link your authenticator shows), then press Connect",
         ],
     },
 }

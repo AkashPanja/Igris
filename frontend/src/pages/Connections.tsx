@@ -186,43 +186,65 @@ function AddConnectionForm({
                 required
               />
             </div>
-            <div className="space-y-1.5">
-              <Label>{isFyers ? 'App Secret' : 'TOTP Secret'}</Label>
-              <Input
-                type="password"
-                value={secret}
-                onChange={(e) => setSecret(e.target.value)}
-                placeholder={isFyers ? 'Secret key from dashboard' : 'Base32 secret from QR / authenticator'}
-                required={isFyers || (!secret && !totpQr)}
-              />
-            </div>
-            {!isFyers && (
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label>TOTP QR Code</Label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    value={totpQr}
-                    onChange={(e) => onQrPaste(e.target.value)}
-                    placeholder="Paste QR content (otpauth://…) or upload the QR image →"
-                    className="h-11 max-w-md flex-1"
-                  />
-                  <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800">
-                    Scan QR image
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        void onQrFile(e.target.files?.[0])
-                        e.target.value = ''
-                      }}
-                    />
-                  </label>
-                </div>
-                {qrNotice && (
-                  <p className="text-xs text-emerald-600 dark:text-emerald-400">{qrNotice}</p>
-                )}
+            {isFyers && (
+              <div className="space-y-1.5">
+                <Label>App Secret</Label>
+                <Input
+                  type="password"
+                  value={secret}
+                  onChange={(e) => setSecret(e.target.value)}
+                  placeholder="Secret key from dashboard"
+                  required
+                />
               </div>
+            )}
+            {!isFyers && (
+              <>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label>TOTP QR Code</Label>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Groww does not show the TOTP secret as text — scan the QR into your
+                    authenticator app, then upload a screenshot of the QR here (or paste the
+                    otpauth link your authenticator shows).
+                  </p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg bg-gradient-brand px-4 text-sm font-medium text-white shadow-sm transition hover:opacity-90">
+                      Upload QR image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          void onQrFile(e.target.files?.[0])
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
+                    <Input
+                      value={totpQr}
+                      onChange={(e) => onQrPaste(e.target.value)}
+                      placeholder="…or paste otpauth://… link"
+                      className="h-11 max-w-md flex-1"
+                      required={!secret}
+                    />
+                  </div>
+                  {qrNotice && (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400">{qrNotice}</p>
+                  )}
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs text-slate-500 dark:text-slate-400">
+                    TOTP Secret (only if you cannot upload the QR)
+                  </Label>
+                  <Input
+                    type="password"
+                    value={secret}
+                    onChange={(e) => setSecret(e.target.value)}
+                    placeholder="Base32 secret from your authenticator app"
+                    className="max-w-md"
+                  />
+                </div>
+              </>
             )}
 
             {error && (
