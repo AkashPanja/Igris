@@ -57,3 +57,23 @@ class LoginAttempt(Base):
     username: Mapped[str] = mapped_column(String(64), index=True)
     success: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Connection(Base):
+    __tablename__ = "connections"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32))  # fyers | groww
+    label: Mapped[str] = mapped_column(String(128), default="")
+    # public identifiers (safe to show)
+    app_id: Mapped[str] = mapped_column(String(255), default="")   # fyers app id / groww api key
+    # encrypted JSON: {app_secret?, totp_secret?, access_token?}
+    credentials: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(24), default="never_authed")
+    # never_authed | connected | needs_auth | error
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reauth_time: Mapped[str] = mapped_column(String(5), default="07:30")
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    last_reauth_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

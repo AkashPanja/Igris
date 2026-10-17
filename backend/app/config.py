@@ -24,6 +24,8 @@ class Settings(BaseSettings):
     login_max_failures: int = 5
     login_lockout_minutes: int = 15
     port: int = 4024
+    public_base_url: str = "http://igris.bnfkquodqjp.uk/"
+    default_reauth_time: str = "07:30"
 
     model_config = SettingsConfigDict(
         env_file=".env",

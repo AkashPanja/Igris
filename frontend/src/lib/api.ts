@@ -27,6 +27,9 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body: body !== undefined ? JSON.stringify(body) : undefined }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PATCH', body: body !== undefined ? JSON.stringify(body) : undefined }),
+  del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
 
 export interface SetupState {
@@ -59,4 +62,36 @@ export interface SmtpConfig {
   password: string
   from_name: string
   from_email: string
+}
+
+export type Provider = 'fyers' | 'groww'
+export type ConnectionStatus = 'never_authed' | 'connected' | 'needs_auth' | 'error'
+
+export interface Connection {
+  id: string
+  provider: Provider
+  label: string
+  app_id: string
+  status: ConnectionStatus
+  expires_at: string | null
+  reauth_time: string
+  last_error: string
+  last_reauth_at: string | null
+  tools: string[]
+}
+
+export interface ConnectionsConfig {
+  public_base_url: string
+  manual_flow: boolean
+  redirect_uri: string
+  help: Record<
+    string,
+    { title: string; url: string; url_label: string; steps: string[] }
+  >
+  tools: Record<string, string[]>
+}
+
+export interface TestResult {
+  success: boolean
+  message: string
 }

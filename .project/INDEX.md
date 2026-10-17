@@ -1,11 +1,11 @@
 # Igris — Project Index
 
-**Goal:** Trading web app foundation (Sprint 1): install lock, setup wizard, auth, secure config, deployable shell. No broker/order logic.
+**Goal:** Trading web app. S1 foundation done. Now adding broker connections (Fyers) for LLM tools.
 
-**Sprint:** S1 — Foundation & Auth — **done** (2026-10-17)
-**Story:** none active
-**Next action:** push commit `a14f17e` to GitHub; await S2 direction
+**Sprint:** S2 — Trading Connections (done)
+**Story:** US-009..US-018 complete
+**Next action:** user review → next sprint
 
-**Blockers:** none (push needs your GitHub credentials)
+**Blockers:** none (GitHub push blocked — no credentials; all commits local)
 
-**Last completed:** REQ-001 / S1. 12 pytest pass. Frontend builds. Live on :4024. Commit `a14f17e` local only.
+**Last completed:** S2 done (REQ-002): Fyers OAuth + Groww TOTP connections, scheduler reauth, emails, /connections UI. 30/30 pytest pass. Frontend build clean. Live :4024 verified.

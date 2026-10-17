@@ -1,45 +1,15 @@
-import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, LogOut, User } from 'lucide-react'
-import { LogoMark } from '@/components/AuthLayout'
-import { Button } from '@/components/ui/button'
+import { LayoutDashboard, User } from 'lucide-react'
+import { AppHeader } from '@/components/AppHeader'
 import { Card, CardContent } from '@/components/ui/card'
 import { useSession } from '@/hooks/useSession'
 
 export default function HomePage() {
-  const { user, logout } = useSession()
-  const navigate = useNavigate()
-
-  async function onLogout() {
-    await logout()
-    navigate('/login', { replace: true })
-  }
+  const { user } = useSession()
 
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
-      <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/80 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/80">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Link to="/" className="flex items-center gap-2.5">
-            <LogoMark className="h-8 w-8 rounded-lg" />
-            <span className="font-display text-base font-semibold tracking-tight">Igris</span>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            <div className="hidden items-center gap-2 rounded-full border border-slate-200 bg-slate-50 py-1 pl-1 pr-3 dark:border-slate-700 dark:bg-slate-900 sm:flex">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-accent-500 text-xs font-semibold text-white">
-                {(user?.username || '?').slice(0, 1).toUpperCase()}
-              </div>
-              <span className="max-w-[120px] truncate text-sm font-medium">
-                {user?.username || 'User'}
-              </span>
-            </div>
-            <Button variant="ghost" size="sm" onClick={onLogout} className="text-slate-600 dark:text-slate-300">
-              <LogOut className="h-4 w-4" />
-              <span className="hidden sm:inline">Logout</span>
-            </Button>
-          </div>
-        </div>
-      </header>
+      <AppHeader />
 
       <main className="mx-auto max-w-6xl px-4 py-12 sm:px-6 sm:py-16">
         <motion.div

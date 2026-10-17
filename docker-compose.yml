@@ -11,6 +11,7 @@ services:
       - PORT=4024
       - SECRET_KEY=${SECRET_KEY:-}
       - SETUP_TOKEN=${SETUP_TOKEN:-}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-http://igris.bnfkquodqjp.uk/}
     volumes:
       - igris_data:/data
     restart: unless-stopped

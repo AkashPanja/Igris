@@ -9,6 +9,7 @@ import LoginPage from '@/pages/Login'
 import ForgotPasswordPage from '@/pages/ForgotPassword'
 import ResetPasswordPage from '@/pages/ResetPassword'
 import HomePage from '@/pages/Home'
+import ConnectionsPage from '@/pages/Connections'
 
 function Spinner() {
   return (
@@ -87,6 +88,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <HomePage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/connections"
+        element={
+          <RequireAuth>
+            <ConnectionsPage />
           </RequireAuth>
         }
       />

@@ -12,3 +12,7 @@ cryptography==50.0.2
 httpx==0.28.1
 pytest==9.1.1
 pytest-asyncio==1.4.0
+growwapi==1.5.0
+pyotp==2.10.0
+aws_lambda_powertools==3.36.0
+requests==2.34.2

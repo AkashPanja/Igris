@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import Base, engine
 from app.routers import auth as auth_router
+from app.routers import connections as connections_router
 from app.routers import setup as setup_router
 
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -24,7 +25,13 @@ async def init_db() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
-    yield
+    from app.services import scheduler
+
+    task = scheduler.start()
+    try:
+        yield
+    finally:
+        task.cancel()
 
 
 def create_app() -> FastAPI:
@@ -40,6 +47,9 @@ def create_app() -> FastAPI:
 
     app.include_router(setup_router.router, prefix="/api/setup", tags=["setup"])
     app.include_router(auth_router.router, prefix="/api/auth", tags=["auth"])
+    app.include_router(
+        connections_router.router, prefix="/api/connections", tags=["connections"]
+    )
 
     @app.get("/api/health")
     async def health() -> dict:
