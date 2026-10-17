@@ -58,9 +58,9 @@ PROVIDER_HELP = {
         "steps": [
             "Log in to groww.in → profile → Trading APIs, or open the Groww Cloud API Keys page",
             "Open the 'Generate API key' dropdown → choose 'Generate TOTP token', name it, Continue",
-            "Copy the TOTP Token shown (it is shown only once) and paste it below",
-            "The same screen shows a QR code only — there is NO secret text. Scan the QR with Google Authenticator / any authenticator app",
-            "Upload a screenshot of that QR below (or paste the otpauth link your authenticator shows), then press Connect",
+            "Copy the TOTP Token and paste it below",
+            "Copy the TOTP QR Code text shown next to it and paste it below",
+            "Press Connect — Igris generates the daily codes from the QR code automatically",
         ],
     },
 }

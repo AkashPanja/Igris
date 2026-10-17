@@ -84,12 +84,12 @@ async def create_connection(
             raise HTTPException(status_code=422, detail="App secret is required")
         creds["app_secret"] = body.app_secret.strip()
     else:
-        # Groww TOTP flow: secret may be typed (base32) or pasted as QR payload
+        # Groww TOTP flow: TOTP QR Code text (otpauth:// payload or base32)
         source = body.app_secret.strip() or body.totp_qr.strip()
         if not source:
             raise HTTPException(
                 status_code=422,
-                detail="TOTP secret or TOTP QR code is required",
+                detail="TOTP QR Code is required",
             )
         try:
             creds["totp_secret"] = svc.extract_totp_secret(source)

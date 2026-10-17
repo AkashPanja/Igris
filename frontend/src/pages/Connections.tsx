@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import jsQR from 'jsqr'
 import {
   Cable,
   CheckCircle2,
@@ -46,19 +45,6 @@ function fmtTime(iso: string | null): string {
   }
 }
 
-/** Extract base32 secret from an otpauth:// QR payload. */
-function secretFromOtpauth(raw: string): string | null {
-  const s = raw.trim()
-  if (!s.toLowerCase().startsWith('otpauth://')) return null
-  try {
-    const u = new URL(s)
-    const secret = u.searchParams.get('secret')
-    return secret ? secret.toUpperCase().replace(/\s+/g, '') : null
-  } catch {
-    return null
-  }
-}
-
 /* ------------------------------- Add form ------------------------------- */
 
 function AddConnectionForm({
@@ -75,7 +61,6 @@ function AddConnectionForm({
   const [appId, setAppId] = useState('')
   const [secret, setSecret] = useState('')
   const [totpQr, setTotpQr] = useState('')
-  const [qrNotice, setQrNotice] = useState('')
   const [showHelp, setShowHelp] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -83,47 +68,6 @@ function AddConnectionForm({
   const help = config.help[provider]
   const isFyers = provider === 'fyers'
   const steps = help?.steps.map((s) => s.replace('{redirect}', config.redirect_uri)) ?? []
-
-  async function onQrFile(file: File | undefined) {
-    if (!file) return
-    setQrNotice('')
-    setError('')
-    try {
-      const url = URL.createObjectURL(file)
-      const img = new Image()
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve()
-        img.onerror = () => reject(new Error('Could not read image file'))
-        img.src = url
-      })
-      const canvas = document.createElement('canvas')
-      canvas.width = img.naturalWidth
-      canvas.height = img.naturalHeight
-      const ctx = canvas.getContext('2d')
-      if (!ctx) throw new Error('Canvas not available')
-      ctx.drawImage(img, 0, 0)
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(url)
-      const code = jsQR(data.data, data.width, data.height)
-      const sec = code?.data ? secretFromOtpauth(code.data) : null
-      if (!sec) throw new Error('No TOTP QR code found in that image')
-      setSecret(sec)
-      setQrNotice(`QR scanned — TOTP secret extracted from ${file.name}`)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'QR scan failed')
-    }
-  }
-
-  function onQrPaste(value: string) {
-    setTotpQr(value)
-    const sec = secretFromOtpauth(value)
-    if (sec) {
-      setSecret(sec)
-      setQrNotice('QR content recognized — TOTP secret extracted')
-    } else if (value.trim()) {
-      setQrNotice('')
-    }
-  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -134,7 +78,7 @@ function AddConnectionForm({
         provider,
         label,
         app_id: appId,
-        app_secret: secret,
+        app_secret: isFyers ? secret : '',
         totp_qr: isFyers ? '' : totpQr,
       })
       onCreated()
@@ -154,22 +98,22 @@ function AddConnectionForm({
     >
       <Card className="border-brand-500/30">
         <CardContent className="p-5 sm:p-6">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-display text-base font-semibold">Add trading connection</h2>
             <Button variant="ghost" size="sm" onClick={onClose}>
               Cancel
             </Button>
           </div>
 
-          <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
+          <form onSubmit={submit} className="grid min-w-0 gap-4 sm:grid-cols-2">
+            <div className="min-w-0 space-y-1.5">
               <Label>Broker</Label>
               <Select value={provider} onChange={(e) => setProvider(e.target.value as Provider)}>
                 <option value="fyers">Fyers</option>
                 <option value="groww">Groww</option>
               </Select>
             </div>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <Label>Label</Label>
               <Input
                 value={label}
@@ -177,17 +121,17 @@ function AddConnectionForm({
                 placeholder={isFyers ? 'Fyers main account' : 'Groww main account'}
               />
             </div>
-            <div className="space-y-1.5">
+            <div className="min-w-0 space-y-1.5">
               <Label>{isFyers ? 'App ID' : 'TOTP Token'}</Label>
               <Input
                 value={appId}
                 onChange={(e) => setAppId(e.target.value)}
-                placeholder={isFyers ? 'e.g. ABC12345X' : 'Token shown after "Generate TOTP token"'}
+                placeholder={isFyers ? 'e.g. ABC12345X' : 'TOTP Token from Groww'}
                 required
               />
             </div>
             {isFyers && (
-              <div className="space-y-1.5">
+              <div className="min-w-0 space-y-1.5">
                 <Label>App Secret</Label>
                 <Input
                   type="password"
@@ -199,59 +143,22 @@ function AddConnectionForm({
               </div>
             )}
             {!isFyers && (
-              <>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label>TOTP QR Code</Label>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Groww does not show the TOTP secret as text — scan the QR into your
-                    authenticator app, then upload a screenshot of the QR here (or paste the
-                    otpauth link your authenticator shows).
-                  </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg bg-gradient-brand px-4 text-sm font-medium text-white shadow-sm transition hover:opacity-90">
-                      Upload QR image
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          void onQrFile(e.target.files?.[0])
-                          e.target.value = ''
-                        }}
-                      />
-                    </label>
-                    <Input
-                      value={totpQr}
-                      onChange={(e) => onQrPaste(e.target.value)}
-                      placeholder="…or paste otpauth://… link"
-                      className="h-11 max-w-md flex-1"
-                      required={!secret}
-                    />
-                  </div>
-                  {qrNotice && (
-                    <p className="text-xs text-emerald-600 dark:text-emerald-400">{qrNotice}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label className="text-xs text-slate-500 dark:text-slate-400">
-                    TOTP Secret (only if you cannot upload the QR)
-                  </Label>
-                  <Input
-                    type="password"
-                    value={secret}
-                    onChange={(e) => setSecret(e.target.value)}
-                    placeholder="Base32 secret from your authenticator app"
-                    className="max-w-md"
-                  />
-                </div>
-              </>
+              <div className="min-w-0 space-y-1.5">
+                <Label>TOTP QR Code</Label>
+                <Input
+                  value={totpQr}
+                  onChange={(e) => setTotpQr(e.target.value)}
+                  placeholder="TOTP QR Code text from Groww"
+                  required
+                />
+              </div>
             )}
 
             {error && (
-              <p className="text-sm text-red-600 sm:col-span-2">{error}</p>
+              <p className="break-words text-sm text-red-600 sm:col-span-2">{error}</p>
             )}
 
-            <div className="flex items-center justify-between gap-3 sm:col-span-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 sm:col-span-2">
               <button
                 type="button"
                 onClick={() => setShowHelp((v) => !v)}
@@ -267,20 +174,22 @@ function AddConnectionForm({
             </div>
 
             {showHelp && help && (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60 sm:col-span-2">
+              <div className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60 sm:col-span-2">
                 <p className="mb-2 text-sm font-semibold">{help.title}</p>
                 <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600 dark:text-slate-300">
                   {steps.map((s, i) => (
-                    <li key={i}>{s}</li>
+                    <li key={i} className="break-words [overflow-wrap:anywhere]">
+                      {s}
+                    </li>
                   ))}
                 </ol>
                 <a
                   href={help.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
+                  className="mt-3 inline-flex items-center gap-1.5 break-all text-sm font-medium text-brand-600 hover:underline dark:text-brand-400"
                 >
-                  {help.url_label} <ExternalLink className="h-3.5 w-3.5" />
+                  {help.url_label} <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                 </a>
               </div>
             )}
@@ -381,20 +290,24 @@ function ConnectionCard({
       <Card className="h-full">
         <CardContent className="p-5">
           <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               <div
-                className={`flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${pBadge.cls} text-sm font-bold text-white`}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${pBadge.cls} text-sm font-bold text-white`}
               >
                 {pBadge.text}
               </div>
-              <div>
-                <p className="font-display text-sm font-semibold leading-tight">{conn.label}</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+              <div className="min-w-0">
+                <p className="truncate font-display text-sm font-semibold leading-tight">
+                  {conn.label}
+                </p>
+                <p className="truncate text-xs text-slate-500 dark:text-slate-400">
                   {conn.provider === 'fyers' ? 'Fyers' : 'Groww'} · {conn.app_id || '—'}
                 </p>
               </div>
             </div>
-            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${badge.cls}`}>
+            <span
+              className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${badge.cls}`}
+            >
               {badge.label}
             </span>
           </div>
