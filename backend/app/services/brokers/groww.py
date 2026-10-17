@@ -35,12 +35,9 @@ async def test_connection(access_token: str) -> tuple[bool, str]:
     start = time.monotonic()
     try:
         groww = client(access_token)
-        resp = groww.get_user_profile()
+        # SDK raises GrowwAPIException on FAILURE; payload returned on success
+        groww.get_user_profile()
         ms = int((time.monotonic() - start) * 1000)
-        payload = resp if isinstance(resp, dict) else {}
-        ok = payload.get("status") == "SUCCESS" or "groww_user_id" in payload or "payload" in payload
-        if ok:
-            return True, f"OK · {ms}ms"
-        return False, str(payload.get("errors") or payload.get("error") or "Groww API error")
+        return True, f"OK · {ms}ms"
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)

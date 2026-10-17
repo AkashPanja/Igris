@@ -300,7 +300,7 @@ class TestGrowwTotpQr:
         )
         assert r.status_code == 200, r.text
         c = (await client.get("/api/connections")).json()[0]
-        assert c["app_id"] == "totp-token-1"
+        assert c["app_id"] == "totp-t…en-1"  # masked, full token never returned
         from app.database import SessionLocal
         from app.models import Connection
         from app.services import connections as svc
@@ -326,3 +326,43 @@ class TestGrowwTotpQr:
             json={"provider": "groww", "app_id": "t", "app_secret": "", "totp_qr": "garbage"},
         )
         assert r.status_code == 422
+
+
+class TestSecurityAndGrowwTest:
+    def test_mask_secret(self):
+        from app.services.connections import mask_secret
+
+        assert mask_secret("") == ""
+        assert mask_secret("short") == "••••••"
+        m = mask_secret("eyJraWQiOiJaTUtjVXciLCJhbGciOiJFUzI1NiJ9")
+        assert m.startswith("eyJraW") and m.endswith("NiJ9") and "…" in m
+        assert "TUtjVXci" not in m
+
+    async def test_tc040_list_does_not_leak_full_token(self, client):
+        await _complete_setup(client)
+        await _make(client, GROWW_PAYLOAD)
+        body = (await client.get("/api/connections")).json()[0]
+        assert body["app_id"] == "groww_…ey_1"  # masked: groww_key_1
+        assert "groww_key_1" not in (await client.get("/api/connections")).text
+
+    async def test_tc041_groww_test_success_without_profile_fields(self, monkeypatch):
+        import app.services.brokers.groww as gb
+
+        class FakeGroww:
+            def get_user_profile(self):
+                return {"user_id": "abc", "name": "x"}  # no status/payload keys
+
+        monkeypatch.setattr(gb, "client", lambda token: FakeGroww())
+        ok, msg = await gb.test_connection("tok")
+        assert ok and msg.startswith("OK")
+
+    async def test_tc041b_groww_test_failure_message(self, monkeypatch):
+        import app.services.brokers.groww as gb
+
+        class FakeGroww:
+            def get_user_profile(self):
+                raise RuntimeError("Groww API Error 400: Bad Request")
+
+        monkeypatch.setattr(gb, "client", lambda token: FakeGroww())
+        ok, msg = await gb.test_connection("tok")
+        assert not ok and "Bad Request" in msg

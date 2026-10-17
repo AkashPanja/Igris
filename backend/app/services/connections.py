@@ -107,6 +107,16 @@ def save_credentials(conn: Connection, creds: dict) -> None:
     conn.credentials = encrypt(json.dumps(creds)) if creds else ""
 
 
+def mask_secret(value: str) -> str:
+    """Never expose full credential material in API responses / UI."""
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if len(v) <= 10:
+        return "••••••"
+    return f"{v[:6]}…{v[-4:]}"
+
+
 def public_view(conn: Connection, user: User | None = None) -> dict:
     from app.config import settings
 
@@ -114,7 +124,7 @@ def public_view(conn: Connection, user: User | None = None) -> dict:
         "id": conn.id,
         "provider": conn.provider,
         "label": conn.label,
-        "app_id": conn.app_id,
+        "app_id": mask_secret(conn.app_id),
         "status": conn.status,
         "expires_at": conn.expires_at.isoformat() if conn.expires_at else None,
         "reauth_time": conn.reauth_time or settings.default_reauth_time,
