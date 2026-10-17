@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# Data / secrets
+/data/
+*.db
+*.db-shm
+*.db-wal
+.secret_key
+.env
+.env.local
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+backend/.venv/

@@ -1,0 +1,20 @@
+services:
+  igris:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: igris
+    ports:
+      - "4024:4024"
+    environment:
+      - DATA_DIR=/data
+      - PORT=4024
+      - SECRET_KEY=${SECRET_KEY:-}
+      - SETUP_TOKEN=${SETUP_TOKEN:-}
+    volumes:
+      - igris_data:/data
+    restart: unless-stopped
+
+volumes:
+  igris_data:
+    driver: local
