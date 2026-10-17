@@ -4,6 +4,21 @@ from datetime import datetime, timedelta, timezone
 
 from app.config import settings
 
+# Fyers access tokens expire daily at 06:30 AM IST
+FYERS_TOKEN_EXPIRE_H, FYERS_TOKEN_EXPIRE_M = 6, 30
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def next_token_expiry(now: datetime | None = None) -> datetime:
+    """UTC time of the next 06:30 AM IST — when Fyers kills the access token."""
+    now_ist = (now or datetime.now(timezone.utc)).astimezone(IST)
+    target = now_ist.replace(
+        hour=FYERS_TOKEN_EXPIRE_H, minute=FYERS_TOKEN_EXPIRE_M, second=0, microsecond=0
+    )
+    if now_ist >= target:
+        target += timedelta(days=1)
+    return target.astimezone(timezone.utc)
+
 
 def is_manual_flow() -> bool:
     """True when there is no usable public base URL (localhost / empty)."""
@@ -52,9 +67,8 @@ async def exchange_code(app_id: str, app_secret: str, auth_code: str) -> dict:
     token = result.get("access_token")
     if not token:
         raise RuntimeError("Fyers did not return access token")
-    # Fyers access tokens are short-lived (1 day); reauth via morning check.
-    expires = datetime.now(timezone.utc) + timedelta(days=1)
-    return {"access_token": token, "expires_at": expires}
+    # Per docs: tokens expire daily at 06:30 AM IST
+    return {"access_token": token, "expires_at": next_token_expiry()}
 
 
 def client(app_id: str, access_token: str):

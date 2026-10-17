@@ -23,3 +23,7 @@
 - Groww docs use "TOTP Token" (Bearer api_key) + "TOTP Secret" (base32, shown as QR). UI/API renamed accordingly.
 - CreateConnection now accepts `totp_qr` (otpauth:// payload) as alternative to typed secret; `extract_totp_secret()` parses/validates (base32, len>=16).
 - Frontend: "Scan QR image" upload decodes via jsQR client-side and auto-fills the secret; paste of otpauth URL also works.
+
+## 2026-10-17 — Fyers docs compliance
+- Per https://fyers.in/api-docs/v3/api/authentication/individual-app/: tokens expire daily 06:30 AM IST — expiry now = next 06:30 IST (was now+24h).
+- SDK endpoints (api-t1.fyers.in/api/v3/generate-authcode + /validate-authcode) verified against docs; appIdHash = SHA-256(app_id:app_secret) handled by SessionModel.

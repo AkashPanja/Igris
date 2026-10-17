@@ -366,3 +366,21 @@ class TestSecurityAndGrowwTest:
         monkeypatch.setattr(gb, "client", lambda token: FakeGroww())
         ok, msg = await gb.test_connection("tok")
         assert not ok and "Bad Request" in msg
+
+
+class TestFyersExpiry:
+    def test_tc042_token_expires_next_630am_ist(self):
+        from datetime import datetime, timedelta, timezone
+
+        from app.services.brokers.fyers import IST, next_token_expiry
+
+        # 05:00 IST on Oct 17 -> expires same day 06:30 IST
+        before = datetime(2026, 10, 17, 5, 0, tzinfo=IST)
+        exp = next_token_expiry(before)
+        assert exp == datetime(2026, 10, 17, 6, 30, tzinfo=IST).astimezone(timezone.utc)
+        # 07:00 IST on Oct 17 -> expires next day 06:30 IST
+        after = datetime(2026, 10, 17, 7, 0, tzinfo=IST)
+        exp2 = next_token_expiry(after)
+        assert exp2 == datetime(2026, 10, 18, 6, 30, tzinfo=IST).astimezone(timezone.utc)
+        # always in the future relative to now
+        assert exp > datetime.now(timezone.utc) - timedelta(days=1)

@@ -46,9 +46,9 @@ PROVIDER_HELP = {
         "steps": [
             "Sign up / log in at fyers.in",
             "Open the Fyers API Dashboard (link above)",
-            "Create a new app: set any name and the redirect URL {redirect}",
+            "Create an Individual app: any name + redirect URL {redirect} (must match exactly)",
             "Copy the App ID (client_id) and Secret Key",
-            "Paste them below, then Continue to OAuth",
+            "Paste them below, then Continue to OAuth. Note: Fyers tokens expire daily at 6:30 AM — Igris emails you each morning to re-authorize",
         ],
     },
     "groww": {
