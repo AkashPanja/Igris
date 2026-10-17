@@ -52,18 +52,42 @@ PROVIDER_HELP = {
         ],
     },
     "groww": {
-        "title": "How to get Groww API Key & TOTP secret",
-        "url": "https://groww.in/finance-api",
-        "url_label": "Groww Finance API page",
+        "title": "How to get Groww TOTP Token & QR Code",
+        "url": "https://groww.in/trade-api/docs",
+        "url_label": "Groww Trading API docs",
         "steps": [
-            "Log in to groww.in and open the Finance API page (link above)",
-            "Enable API access for your account",
-            "Copy the API Key",
-            "Copy the TOTP secret (used for daily auto-login)",
-            "Paste them below and press Connect",
+            "Log in to groww.in → profile → Trading APIs, or open the Groww Cloud API Keys page",
+            "Open the 'Generate API key' dropdown → choose 'Generate TOTP token', name it, Continue",
+            "Copy the TOTP Token shown (it is shown only once)",
+            "Scan the TOTP QR Code with Google Authenticator / Authenticator app (or copy the TOTP secret text)",
+            "Paste the TOTP Token below, then paste the QR code content or type the secret, and press Connect",
         ],
     },
 }
+
+_BASE32_CHARS = set("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567=")
+
+
+def normalize_base32(value: str) -> str:
+    return "".join(value.split()).upper()
+
+
+def extract_totp_secret(text: str) -> str:
+    """Accept a base32 secret OR QR payload (otpauth:// URL) and return the base32 secret."""
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    if "otpauth://" in raw.lower():
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(raw)
+        qs = parse_qs(parsed.query)
+        secret = (qs.get("secret") or [""])[0]
+        raw = secret
+    secret = normalize_base32(raw)
+    if not secret or not set(secret) <= _BASE32_CHARS or len(secret) < 16:
+        raise ValueError("TOTP secret is not valid base32 (check the QR/secret)")
+    return secret
 
 
 def utcnow() -> datetime:

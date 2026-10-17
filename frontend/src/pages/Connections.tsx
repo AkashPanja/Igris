@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
+import jsQR from 'jsqr'
 import {
   Cable,
   CheckCircle2,
@@ -45,6 +46,19 @@ function fmtTime(iso: string | null): string {
   }
 }
 
+/** Extract base32 secret from an otpauth:// QR payload. */
+function secretFromOtpauth(raw: string): string | null {
+  const s = raw.trim()
+  if (!s.toLowerCase().startsWith('otpauth://')) return null
+  try {
+    const u = new URL(s)
+    const secret = u.searchParams.get('secret')
+    return secret ? secret.toUpperCase().replace(/\s+/g, '') : null
+  } catch {
+    return null
+  }
+}
+
 /* ------------------------------- Add form ------------------------------- */
 
 function AddConnectionForm({
@@ -60,6 +74,8 @@ function AddConnectionForm({
   const [label, setLabel] = useState('')
   const [appId, setAppId] = useState('')
   const [secret, setSecret] = useState('')
+  const [totpQr, setTotpQr] = useState('')
+  const [qrNotice, setQrNotice] = useState('')
   const [showHelp, setShowHelp] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -67,6 +83,47 @@ function AddConnectionForm({
   const help = config.help[provider]
   const isFyers = provider === 'fyers'
   const steps = help?.steps.map((s) => s.replace('{redirect}', config.redirect_uri)) ?? []
+
+  async function onQrFile(file: File | undefined) {
+    if (!file) return
+    setQrNotice('')
+    setError('')
+    try {
+      const url = URL.createObjectURL(file)
+      const img = new Image()
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve()
+        img.onerror = () => reject(new Error('Could not read image file'))
+        img.src = url
+      })
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) throw new Error('Canvas not available')
+      ctx.drawImage(img, 0, 0)
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      const code = jsQR(data.data, data.width, data.height)
+      const sec = code?.data ? secretFromOtpauth(code.data) : null
+      if (!sec) throw new Error('No TOTP QR code found in that image')
+      setSecret(sec)
+      setQrNotice(`QR scanned — TOTP secret extracted from ${file.name}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'QR scan failed')
+    }
+  }
+
+  function onQrPaste(value: string) {
+    setTotpQr(value)
+    const sec = secretFromOtpauth(value)
+    if (sec) {
+      setSecret(sec)
+      setQrNotice('QR content recognized — TOTP secret extracted')
+    } else if (value.trim()) {
+      setQrNotice('')
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -78,6 +135,7 @@ function AddConnectionForm({
         label,
         app_id: appId,
         app_secret: secret,
+        totp_qr: isFyers ? '' : totpQr,
       })
       onCreated()
       onClose()
@@ -120,24 +178,52 @@ function AddConnectionForm({
               />
             </div>
             <div className="space-y-1.5">
-              <Label>{isFyers ? 'App ID' : 'API Key'}</Label>
+              <Label>{isFyers ? 'App ID' : 'TOTP Token'}</Label>
               <Input
                 value={appId}
                 onChange={(e) => setAppId(e.target.value)}
-                placeholder={isFyers ? 'e.g. ABC12345X' : 'e.g. growwapi_...'}
+                placeholder={isFyers ? 'e.g. ABC12345X' : 'Token shown after "Generate TOTP token"'}
                 required
               />
             </div>
             <div className="space-y-1.5">
-              <Label>{isFyers ? 'App Secret' : 'TOTP Secret (base32)'}</Label>
+              <Label>{isFyers ? 'App Secret' : 'TOTP Secret'}</Label>
               <Input
                 type="password"
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
-                placeholder={isFyers ? 'Secret key from dashboard' : 'Google Authenticator secret'}
-                required
+                placeholder={isFyers ? 'Secret key from dashboard' : 'Base32 secret from QR / authenticator'}
+                required={isFyers || (!secret && !totpQr)}
               />
             </div>
+            {!isFyers && (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>TOTP QR Code</Label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    value={totpQr}
+                    onChange={(e) => onQrPaste(e.target.value)}
+                    placeholder="Paste QR content (otpauth://…) or upload the QR image →"
+                    className="h-11 max-w-md flex-1"
+                  />
+                  <label className="inline-flex h-11 cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:bg-slate-800">
+                    Scan QR image
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        void onQrFile(e.target.files?.[0])
+                        e.target.value = ''
+                      }}
+                    />
+                  </label>
+                </div>
+                {qrNotice && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">{qrNotice}</p>
+                )}
+              </div>
+            )}
 
             {error && (
               <p className="text-sm text-red-600 sm:col-span-2">{error}</p>

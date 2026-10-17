@@ -31,8 +31,9 @@ async def current_user(
 class CreateConnection(BaseModel):
     provider: str = Field(pattern="^(fyers|groww)$")
     label: str = ""
-    app_id: str = ""            # fyers app id | groww api key
-    app_secret: str = ""        # fyers secret | groww totp secret
+    app_id: str = ""            # fyers app id | groww TOTP token
+    app_secret: str = ""        # fyers secret | groww TOTP secret (base32)
+    totp_qr: str = ""           # groww only: pasted QR payload (otpauth://...)
 
 
 class PatchConnection(BaseModel):
@@ -74,7 +75,8 @@ async def create_connection(
     if body.provider not in svc.PROVIDERS:
         raise HTTPException(status_code=422, detail="Unknown provider")
     if not body.app_id.strip():
-        raise HTTPException(status_code=422, detail="App ID / API key is required")
+        default_id = "TOTP token is required" if body.provider == "groww" else "App ID is required"
+        raise HTTPException(status_code=422, detail=default_id)
 
     creds: dict = {}
     if body.provider == "fyers":
@@ -82,9 +84,17 @@ async def create_connection(
             raise HTTPException(status_code=422, detail="App secret is required")
         creds["app_secret"] = body.app_secret.strip()
     else:
-        if not body.app_secret.strip():
-            raise HTTPException(status_code=422, detail="TOTP secret is required")
-        creds["totp_secret"] = body.app_secret.strip()
+        # Groww TOTP flow: secret may be typed (base32) or pasted as QR payload
+        source = body.app_secret.strip() or body.totp_qr.strip()
+        if not source:
+            raise HTTPException(
+                status_code=422,
+                detail="TOTP secret or TOTP QR code is required",
+            )
+        try:
+            creds["totp_secret"] = svc.extract_totp_secret(source)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
 
     await svc.create_connection(
         session,

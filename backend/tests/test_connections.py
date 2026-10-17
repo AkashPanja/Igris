@@ -264,3 +264,65 @@ class TestScheduler:
             last_reauth_at=None,
         )
         assert _due_for_reauth(c) is True
+
+
+class TestGrowwTotpQr:
+    def test_extract_totp_secret_from_otpauth(self):
+        from app.services.connections import extract_totp_secret
+
+        qr = "otpauth://totp/Groww:api?secret=JBSWY3DPEHPK3PXP&issuer=Groww&digits=6"
+        assert extract_totp_secret(qr) == "JBSWY3DPEHPK3PXP"
+
+    def test_extract_totp_secret_plain_base32(self):
+        from app.services.connections import extract_totp_secret
+
+        assert extract_totp_secret(" jbsw y3dp ehpk 3pxp ") == "JBSWY3DPEHPK3PXP"
+
+    def test_extract_totp_secret_invalid(self):
+        import pytest
+
+        from app.services.connections import extract_totp_secret
+
+        with pytest.raises(ValueError):
+            extract_totp_secret("not-a-secret!")
+
+    async def test_tc039_create_groww_with_qr_payload(self, client):
+        await _complete_setup(client)
+        r = await client.post(
+            "/api/connections",
+            json={
+                "provider": "groww",
+                "label": "Groww QR",
+                "app_id": "totp-token-1",
+                "app_secret": "",
+                "totp_qr": "otpauth://totp/Groww:api?secret=JBSWY3DPEHPK3PXP&issuer=Groww",
+            },
+        )
+        assert r.status_code == 200, r.text
+        c = (await client.get("/api/connections")).json()[0]
+        assert c["app_id"] == "totp-token-1"
+        from app.database import SessionLocal
+        from app.models import Connection
+        from app.services import connections as svc
+
+        async with SessionLocal() as s:
+            conn = await s.get(Connection, c["id"])
+            assert svc.load_credentials(conn)["totp_secret"] == "JBSWY3DPEHPK3PXP"
+
+    async def test_tc039b_groww_requires_token_and_secret(self, client):
+        await _complete_setup(client)
+        r = await client.post(
+            "/api/connections",
+            json={"provider": "groww", "app_id": "", "app_secret": "", "totp_qr": ""},
+        )
+        assert r.status_code == 422
+        r = await client.post(
+            "/api/connections",
+            json={"provider": "groww", "app_id": "t", "app_secret": "", "totp_qr": ""},
+        )
+        assert r.status_code == 422
+        r = await client.post(
+            "/api/connections",
+            json={"provider": "groww", "app_id": "t", "app_secret": "", "totp_qr": "garbage"},
+        )
+        assert r.status_code == 422

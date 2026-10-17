@@ -18,3 +18,8 @@
 - fyers-apiv3 installed with `--no-deps` (pins conflict with growwapi aiohttp>=3.11); needs requests + aws_lambda_powertools; growwapi installed normally + pyotp for TOTP.
 - Scheduler: asyncio task (main lifespan), 60s tick; per-connection reauth_time (default 07:30) — Groww auto TOTP login, Fyers expiry→needs_auth + email; email skipped if SMTP unset.
 - Tests: fixtures moved to tests/conftest.py; 30/30 pass; frontend build clean.
+
+## 2026-10-17 — Groww TOTP Token + QR Code (docs fix)
+- Groww docs use "TOTP Token" (Bearer api_key) + "TOTP Secret" (base32, shown as QR). UI/API renamed accordingly.
+- CreateConnection now accepts `totp_qr` (otpauth:// payload) as alternative to typed secret; `extract_totp_secret()` parses/validates (base32, len>=16).
+- Frontend: "Scan QR image" upload decodes via jsQR client-side and auto-fills the secret; paste of otpauth URL also works.
