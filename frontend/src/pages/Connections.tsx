@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
@@ -53,7 +53,7 @@ function AddConnectionForm({
   onClose,
 }: {
   config: ConnectionsConfig
-  onCreated: () => void
+  onCreated: (id: string) => void
   onClose: () => void
 }) {
   const [provider, setProvider] = useState<Provider>('fyers')
@@ -74,14 +74,14 @@ function AddConnectionForm({
     setBusy(true)
     setError('')
     try {
-      await api.post('/api/connections', {
+      const res = await api.post<{ detail: string; id: string }>('/api/connections', {
         provider,
         label,
         app_id: appId,
         app_secret: isFyers ? secret : '',
         totp_qr: isFyers ? '' : totpQr,
       })
-      onCreated()
+      onCreated(res.id)
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed')
@@ -206,10 +206,12 @@ function ConnectionCard({
   conn,
   manualFlow,
   onChanged,
+  autoTest = false,
 }: {
   conn: Connection
   manualFlow: boolean
   onChanged: () => void
+  autoTest?: boolean
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [test, setTest] = useState<TestResult | null>(null)
@@ -241,11 +243,23 @@ function ConnectionCard({
     onChanged()
   }
 
+  const autoTestDone = useRef(false)
+  useEffect(() => {
+    if (autoTest && !autoTestDone.current) {
+      autoTestDone.current = true
+      void onTest()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoTest, conn.id])
+
   async function onGrowwConnect() {
     const res = await run('connect', () =>
       api.post<{ detail: string }>(`/api/connections/${conn.id}/connect-groww`),
     )
-    if (res) onChanged()
+    if (res) {
+      onChanged()
+      void onTest()
+    }
   }
 
   async function onFyersAuth() {
@@ -262,12 +276,13 @@ function ConnectionCard({
   }
 
   async function submitCode() {
-    await run('complete', () =>
+    const res = await run('complete', () =>
       api.post(`/api/connections/${conn.id}/complete-auth`, { code: code.trim() }),
     )
     setPasteMode(false)
     setCode('')
     onChanged()
+    if (res) void onTest()
   }
 
   async function onReauthTime(value: string) {
@@ -464,6 +479,7 @@ export default function ConnectionsPage() {
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
   const [error, setError] = useState('')
+  const [autoTestId, setAutoTestId] = useState<string | null>(null)
   const [params] = useSearchParams()
 
   const refresh = useCallback(async () => {
@@ -485,6 +501,11 @@ export default function ConnectionsPage() {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  function handleCreated(id: string) {
+    setAutoTestId(id)
+    void refresh()
+  }
 
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
@@ -530,7 +551,7 @@ export default function ConnectionsPage() {
         {config && adding && (
           <AddConnectionForm
             config={config}
-            onCreated={refresh}
+            onCreated={handleCreated}
             onClose={() => setAdding(false)}
           />
         )}
@@ -556,6 +577,7 @@ export default function ConnectionsPage() {
                 conn={c}
                 manualFlow={config?.manual_flow ?? false}
                 onChanged={refresh}
+                autoTest={c.id === autoTestId}
               />
             ))}
           </div>

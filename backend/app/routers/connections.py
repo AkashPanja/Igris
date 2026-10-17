@@ -65,7 +65,7 @@ async def list_connections(
     return [svc.public_view(c, user_obj) for c in conns]
 
 
-@router.post("", response_model=Message)
+@router.post("")
 async def create_connection(
     body: CreateConnection,
     session: AsyncSession = Depends(get_session),
@@ -96,7 +96,7 @@ async def create_connection(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
-    await svc.create_connection(
+    created = await svc.create_connection(
         session,
         user_obj.id,
         body.provider,
@@ -104,7 +104,7 @@ async def create_connection(
         body.app_id.strip(),
         creds,
     )
-    return Message(detail="created")
+    return {"detail": "created", "id": created.id}
 
 
 @router.patch("/{conn_id}", response_model=Message)
