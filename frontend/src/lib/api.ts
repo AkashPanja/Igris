@@ -95,3 +95,29 @@ export interface TestResult {
   success: boolean
   message: string
 }
+
+export type LlmProvider = 'openai' | 'anthropic' | 'gemini' | 'groq' | 'openrouter' | 'custom'
+
+export interface LlmConnection {
+  id: string
+  provider: LlmProvider
+  provider_label: string
+  label: string
+  api_key_masked: string
+  base_url: string
+  model: string
+  created_at: string | null
+}
+
+export interface LlmProviderInfo {
+  id: LlmProvider
+  label: string
+  key_hint: string
+  models: string[]
+  base_url_required: boolean
+  docs: string
+}
+
+export interface LlmConfig {
+  providers: LlmProviderInfo[]
+}

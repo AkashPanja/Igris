@@ -27,3 +27,8 @@
 ## 2026-10-17 — Fyers docs compliance
 - Per https://fyers.in/api-docs/v3/api/authentication/individual-app/: tokens expire daily 06:30 AM IST — expiry now = next 06:30 IST (was now+24h).
 - SDK endpoints (api-t1.fyers.in/api/v3/generate-authcode + /validate-authcode) verified against docs; appIdHash = SHA-256(app_id:app_secret) handled by SessionModel.
+
+## 2026-10-17 — S3: LLM connections
+- New table llm_connections (provider, encrypted api_key, base_url, model). Providers: openai, anthropic, gemini, groq, openrouter, custom (OpenAI-compatible base URL).
+- Test = real tiny call per provider (chat/messages/generateContent), key masked in UI like broker tokens.
+- Tab "LLM" at /llm; model select from static lists + custom id; keys stored for future assistant/insight features.

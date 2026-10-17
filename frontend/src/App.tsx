@@ -10,6 +10,7 @@ import ForgotPasswordPage from '@/pages/ForgotPassword'
 import ResetPasswordPage from '@/pages/ResetPassword'
 import HomePage from '@/pages/Home'
 import ConnectionsPage from '@/pages/Connections'
+import LlmPage from '@/pages/LLM'
 
 function Spinner() {
   return (
@@ -96,6 +97,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <ConnectionsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/llm"
+        element={
+          <RequireAuth>
+            <LlmPage />
           </RequireAuth>
         }
       />

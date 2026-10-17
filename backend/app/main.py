@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import Base, engine
 from app.routers import auth as auth_router
 from app.routers import connections as connections_router
+from app.routers import llm as llm_router
 from app.routers import setup as setup_router
 
 STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
@@ -50,6 +51,7 @@ def create_app() -> FastAPI:
     app.include_router(
         connections_router.router, prefix="/api/connections", tags=["connections"]
     )
+    app.include_router(llm_router.router, prefix="/api/llm", tags=["llm"])
 
     @app.get("/api/health")
     async def health() -> dict:

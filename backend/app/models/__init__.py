@@ -77,3 +77,16 @@ class Connection(Base):
     last_error: Mapped[str] = mapped_column(Text, default="")
     last_reauth_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class LlmConnection(Base):
+    __tablename__ = "llm_connections"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32))  # openai|anthropic|gemini|groq|openrouter|custom
+    label: Mapped[str] = mapped_column(String(128), default="")
+    api_key_encrypted: Mapped[str] = mapped_column(Text, default="")
+    base_url: Mapped[str] = mapped_column(String(512), default="")
+    model: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

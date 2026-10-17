@@ -1,0 +1,2 @@
+{"level":"DEBUG","location":"[debug:90] fyers_logger","message":{"Status Code":200,"API":"/profile"},"timestamp":"2026-10-17 17:41:37,532+0000","service":"FyersAPIRequest","taskName":"Task-44"}
+{"level":"DEBUG","location":"[debug:90] fyers_logger","message":{"Status Code":200,"API":"/profile"},"timestamp":"2026-10-17 17:43:09,169+0000","service":"FyersAPIRequest","taskName":"Task-69"}
