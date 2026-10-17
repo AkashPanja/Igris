@@ -1,11 +1,16 @@
 # Igris — Project Index
 
-**Goal:** Trading web app. S1 foundation done. Now adding broker connections (Fyers) for LLM tools.
+**Goal:** Trading web app: broker + LLM connections, then consume them (portfolio, insights).
 
-**Sprint:** S2 — Trading Connections (done)
-**Story:** US-009..US-018 complete
-**Next action:** user review → next sprint
+**Sprint:** S3 — LLM Connections (done)
+**Story:** S1 foundation, S2 Fyers/Groww, S3 LLM tab complete
 
-**Blockers:** none (pushed to GitHub via gh auth as AkashPanja)
+**Blockers:** none
 
-**Last completed:** S2 done (REQ-002): Fyers OAuth + Groww TOTP connections, scheduler reauth, emails, /connections UI. 30/30 pytest pass. Frontend build clean. Live :4024 verified.
+**Live:** :4024 (DATA_DIR=/data), server restart after every backend change.
+**Tests:** backend 49/49 pass (`pytest tests/`), frontend `npm run build` clean.
+**Push:** GitHub as AkashPanja; commit style: `feat(Sn): …` / `fix(Sn): …`.
+
+**Last completed:** S3 (REQ-003): LLM tab — openai/anthropic/gemini/groq/openrouter/custom providers, encrypted keys (masked in UI), model select + custom id, real-call test endpoint. Commit cfe0a76.
+
+**Next action:** pick next milestone with user — candidates: (a) use connections: portfolio/holdings via Fyers+Groww, (b) LLM-powered insights/assistant, (c) live quotes/watchlist.
