@@ -447,9 +447,9 @@ function ConnectionCard({
               <p className="mb-2 text-xs">
                 2. You will land on a URL like{' '}
                 <code className="rounded bg-slate-200 px-1 dark:bg-slate-800">
-                  .../callback?code=XXXX
+                  .../callback?auth_code=XXXX
                 </code>{' '}
-                — copy the <b>code</b> and paste it here:
+                — copy the <b>auth_code</b> value and paste it here:
               </p>
               <div className="flex gap-2">
                 <Input

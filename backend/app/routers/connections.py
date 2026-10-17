@@ -190,20 +190,25 @@ async def complete_auth(
 @router.get("/fyers/callback")
 async def fyers_callback(
     request: Request,
+    s: str = "",
     code: str = "",
+    auth_code: str = "",
     state: str = "",
     error: str = "",
     session: AsyncSession = Depends(get_session),
 ) -> Message:
-    # OAuth lands here unauthenticated (cookie IS sent — same site) but we
-    # resolve the connection purely via state to be safe.
+    # Fyers redirects with: ?s=ok&code=200&auth_code=<JWT>&state=<conn_id>
+    # (`code` is the HTTP-ish status; the real auth code is `auth_code`)
+    real_code = (auth_code or "").strip() or (
+        code.strip() if "." in code else ""
+    )
     conn = await session.get(Connection, state) if state else None
-    if error or not code or not conn:
+    if error or s not in ("", "ok") or not real_code or not conn:
         return Message(detail="oauth_failed")
     creds = svc.load_credentials(conn)
     try:
         result = await fyers_broker.exchange_code(
-            conn.app_id, creds.get("app_secret", ""), code
+            conn.app_id, creds.get("app_secret", ""), real_code
         )
     except Exception:  # noqa: BLE001
         conn.status = "error"

@@ -384,3 +384,37 @@ class TestFyersExpiry:
         assert exp2 == datetime(2026, 10, 18, 6, 30, tzinfo=IST).astimezone(timezone.utc)
         # always in the future relative to now
         assert exp > datetime.now(timezone.utc) - timedelta(days=1)
+
+
+class TestFyersCallbackParams:
+    async def test_tc043_callback_uses_auth_code_param(self, client, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+
+        import app.services.brokers.fyers as fb
+
+        seen = {}
+
+        async def fake_exchange(app_id, app_secret, code):
+            seen["code"] = code
+            return {
+                "access_token": "tok",
+                "expires_at": datetime.now(timezone.utc) + timedelta(hours=12),
+            }
+
+        monkeypatch.setattr(fb, "exchange_code", fake_exchange)
+        await _complete_setup(client)
+        conn_id = await _make(client)
+        r = await client.get(
+            "/api/connections/fyers/callback",
+            params={
+                "s": "ok",
+                "code": "200",
+                "auth_code": "HEADER.PAYLOAD.SIG",
+                "state": conn_id,
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 302
+        assert seen["code"] == "HEADER.PAYLOAD.SIG"  # not "200"
+        c = (await client.get("/api/connections")).json()[0]
+        assert c["status"] == "connected"
