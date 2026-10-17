@@ -1,11 +1,21 @@
 import type { ReactNode } from 'react'
 import { motion } from 'framer-motion'
-import { cn } from '@/lib/utils'
 
 interface AuthLayoutProps {
   children: ReactNode
   title: string
   subtitle?: string
+}
+
+export function LogoMark({ className }: { className?: string }) {
+  return (
+    <img
+      src="/logo.svg"
+      alt="Igris"
+      className={className || 'h-8 w-8 rounded-lg'}
+      draggable={false}
+    />
+  )
 }
 
 export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
@@ -33,7 +43,7 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
         >
-          <LogoMark className="h-9 w-9 text-white" />
+          <LogoMark className="h-10 w-10 rounded-xl" />
           <span className="font-display text-xl font-semibold text-white">Igris</span>
         </motion.div>
 
@@ -74,7 +84,7 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
             animate={{ opacity: 1, y: 0 }}
           >
             <div className="mb-6 flex items-center gap-3">
-              <LogoMark className="h-8 w-8 text-brand-600 dark:text-brand-400" />
+              <LogoMark className="h-9 w-9 rounded-xl" />
               <span className="font-display text-lg font-semibold">Igris</span>
             </div>
             <div className="rounded-2xl bg-gradient-brand p-5 text-white">
@@ -111,27 +121,3 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
   )
 }
 
-export function LogoMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 32 32" fill="none" className={cn('h-6 w-6', className)} aria-hidden>
-      <defs>
-        <linearGradient id="igris-g" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-          <stop stopColor="currentColor" />
-          <stop offset="1" stopColor="currentColor" stopOpacity="0.5" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M16 2L28 9V23L16 30L4 23V9L16 2Z"
-        stroke="url(#igris-g)"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M16 10V22M11 13.5L21 18.5M21 13.5L11 18.5"
-        stroke="url(#igris-g)"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}

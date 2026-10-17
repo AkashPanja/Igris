@@ -1,10 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Red rounded-square background -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#F03A17"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bgShine)" opacity="0.25"/>
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#10b981"/>
-      <stop offset="1" stop-color="#14b8a6"/>
+    <linearGradient id="bgShine" x1="80" y1="40" x2="420" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF7A45"/>
+      <stop offset="1" stop-color="#D42B0A"/>
+    </linearGradient>
+    <linearGradient id="hornL" x1="100" y1="120" x2="180" y2="260" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF8EE"/>
+      <stop offset="1" stop-color="#E8D5B8"/>
+    </linearGradient>
+    <linearGradient id="hornR" x1="380" y1="100" x2="300" y2="250" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF8EE"/>
+      <stop offset="1" stop-color="#E8D5B8"/>
+    </linearGradient>
+    <linearGradient id="head" x1="140" y1="160" x2="380" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6B3A2A"/>
+      <stop offset="1" stop-color="#4A2418"/>
+    </linearGradient>
+    <linearGradient id="snout" x1="190" y1="320" x2="320" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F5C99B"/>
+      <stop offset="1" stop-color="#E0A870"/>
     </linearGradient>
   </defs>
-  <path d="M16 2L28 9V23L16 30L4 23V9L16 2Z" stroke="url(#g)" stroke-width="2" stroke-linejoin="round"/>
-  <path d="M16 10V22M11 13.5L21 18.5M21 13.5L11 18.5" stroke="url(#g)" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Left ear -->
+  <ellipse cx="148" cy="290" rx="52" ry="38" transform="rotate(-25 148 290)" fill="#5C3020"/>
+  <!-- Right ear -->
+  <ellipse cx="364" cy="290" rx="52" ry="38" transform="rotate(25 364 290)" fill="#5C3020"/>
+
+  <!-- Left horn -->
+  <path d="M175 210 C155 160 120 130 100 125 C85 122 78 138 90 155 C110 185 130 210 155 235 C165 245 180 235 175 210Z" fill="url(#hornL)"/>
+  <!-- Right horn -->
+  <path d="M337 210 C357 160 392 130 412 125 C427 122 434 138 422 155 C402 185 382 210 357 235 C347 245 332 235 337 210Z" fill="url(#hornR)"/>
+
+  <!-- Head -->
+  <ellipse cx="256" cy="290" rx="150" ry="160" fill="url(#head)"/>
+  <!-- Head top highlight -->
+  <ellipse cx="256" cy="230" rx="120" ry="80" fill="#7A4530" opacity="0.4"/>
+
+  <!-- Snout -->
+  <ellipse cx="256" cy="385" rx="95" ry="75" fill="url(#snout)"/>
+  <!-- Nostrils -->
+  <ellipse cx="225" cy="375" rx="16" ry="22" fill="#3D1F12"/>
+  <ellipse cx="287" cy="375" rx="16" ry="22" fill="#3D1F12"/>
+
+  <!-- Left eye (open) -->
+  <ellipse cx="195" cy="285" rx="32" ry="38" fill="white"/>
+  <ellipse cx="200" cy="290" rx="20" ry="26" fill="#1A1A1A"/>
+  <ellipse cx="207" cy="280" rx="8" ry="10" fill="white"/>
+  <ellipse cx="193" cy="300" rx="4" ry="5" fill="white" opacity="0.6"/>
+
+  <!-- Right eye (winking) -->
+  <path d="M295 290 Q320 270 345 295" stroke="#1A1A1A" stroke-width="10" stroke-linecap="round" fill="none"/>
+  <path d="M300 298 Q320 282 340 300" stroke="#1A1A1A" stroke-width="4" stroke-linecap="round" fill="none" opacity="0.3"/>
+
+  <!-- Yellow accent marks (right) -->
+  <rect x="400" y="255" width="48" height="14" rx="7" transform="rotate(-15 400 255)" fill="#F5B731"/>
+  <rect x="410" y="300" width="40" height="14" rx="7" transform="rotate(-15 410 300)" fill="#F5B731"/>
+  <rect x="405" y="340" width="28" height="12" rx="6" transform="rotate(-15 405 340)" fill="#F5B731" opacity="0.7"/>
 </svg>

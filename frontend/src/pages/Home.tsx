@@ -20,7 +20,7 @@ export default function HomePage() {
       <header className="sticky top-0 z-40 border-b border-slate-200/80 bg-white/80 backdrop-blur-md dark:border-slate-800 dark:bg-slate-950/80">
         <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <LogoMark className="h-7 w-7 text-brand-600 dark:text-brand-400" />
+            <LogoMark className="h-8 w-8 rounded-lg" />
             <span className="font-display text-base font-semibold tracking-tight">Igris</span>
           </Link>
 

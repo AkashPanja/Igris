@@ -34,7 +34,6 @@ export default function SetupPage() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const [appName, setAppName] = useState('Igris')
   const [setupToken, setSetupToken] = useState('')
 
   const [username, setUsername] = useState('')
@@ -77,7 +76,7 @@ export default function SetupPage() {
     setError('')
     setBusy(true)
     try {
-      await api.post('/api/setup/step1', { app_name: appName, setup_token: setupToken })
+      await api.post('/api/setup/step1', { app_name: 'Igris', setup_token: setupToken })
       setStep(1)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed')
@@ -223,17 +222,9 @@ export default function SetupPage() {
             <Card className="border-0 shadow-none">
               <CardContent className="p-0">
                 <form onSubmit={nextFromWelcome} className="space-y-5">
-                  <div className="space-y-2">
-                    <Label htmlFor="app_name">App name</Label>
-                    <Input
-                      id="app_name"
-                      value={appName}
-                      onChange={(e) => setAppName(e.target.value)}
-                      placeholder="Igris"
-                      required
-                    />
-                    <p className="text-xs text-slate-500">Shown in the navbar and on emails.</p>
-                  </div>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Welcome to Igris. Let&apos;s get your workspace set up — it only takes a minute.
+                  </p>
 
                   {state.setup_token_required && (
                     <div className="space-y-2">
@@ -489,7 +480,6 @@ export default function SetupPage() {
             <div className="space-y-6">
               <Card>
                 <CardContent className="space-y-4 p-5">
-                  <SummaryRow label="App name" value={appName} />
                   <SummaryRow label="Admin username" value={username} />
                   <SummaryRow label="Admin email" value={email} />
                   <SummaryRow label="SMTP" value={skipSmtp ? 'Skipped' : smtp.host || 'Not set'} />
