@@ -14,3 +14,5 @@
 **Last completed:** S3 (REQ-003): LLM tab — openai/anthropic/gemini/groq/openrouter/custom providers, encrypted keys (masked in UI), model select + custom id, real-call test endpoint. Commit cfe0a76.
 
 **Next action:** pick next milestone with user — candidates: (a) use connections: portfolio/holdings via Fyers+Groww, (b) LLM-powered insights/assistant, (c) live quotes/watchlist.
+
+**Reference material (not requirements):** `.project/research/2026-10-18-multiiagent-trading-paper.md` — user's design paper: multi-agent autonomous trading system (Scout/News/Macro/Analyst → code Risk/Executor/Monitor, shared DB memory, chat-governed rules, paper-first go-live gates). Parked until user says how to relate it to Igris.
