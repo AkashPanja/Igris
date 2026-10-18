@@ -259,6 +259,7 @@ export interface ChatMsg {
 
 export interface AgentSettingsInfo {
   llm_connection_id: string
+  model: string
   llm_options: { id: string; label: string; provider: string; model: string }[]
 }
 
@@ -280,4 +281,10 @@ export interface AgentStatus {
   open_trades: TradeRow[]
   today_realised_pnl: number
   broker_connections: { id: string; provider: string; status: string; label: string }[]
+}
+
+export interface ModelsResponse {
+  models: string[]
+  source: string
+  provider: string
 }

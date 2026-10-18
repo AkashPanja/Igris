@@ -94,3 +94,29 @@ class TestLlmTestEndpoint:
         conn_id = await _make(client)
         r = await client.post(f"/api/llm/{conn_id}/test")
         assert r.json() == {"success": False, "message": "Incorrect API key provided"}
+
+
+class TestLoadModels:
+    async def test_tc071_models_static_fallback_no_key(self, client):
+        await _complete_setup(client)
+        r = await client.post("/api/llm/models", json={"provider": "groq", "api_key": ""})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["provider"] == "groq"
+        assert body["models"]  # static fallback list
+        assert body["source"].startswith("static")
+
+    async def test_tc072_models_for_saved_connection(self, client):
+        await _complete_setup(client)
+        conn_id = await _make(client)
+        r = await client.post("/api/llm/models", json={"conn_id": conn_id})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["provider"] == "openai"
+        assert body["models"]  # api or static fallback — never empty
+        assert "gpt-4o" in body["models"]
+
+    async def test_tc073_models_unknown_provider_422(self, client):
+        await _complete_setup(client)
+        r = await client.post("/api/llm/models", json={"provider": "nope", "api_key": "x"})
+        assert r.status_code == 422

@@ -71,7 +71,8 @@ async def _llm_for_user(session: AsyncSession, user_id: int) -> tuple:
     key = load_key(row)
     if not key:
         raise HTTPException(status_code=400, detail="LLM connection has no usable API key.")
-    return row.provider, key, row.model, row.base_url
+    model = (settings.model if settings and settings.model else "").strip() or row.model
+    return row.provider, key, model, row.base_url
 
 
 @router.get("/conversations")
@@ -592,13 +593,15 @@ async def get_settings(session: AsyncSession = Depends(get_session), user=Depend
     llms = await list_llm_connections(session, user[0].id)
     return {
         "llm_connection_id": settings.llm_connection_id if settings else "",
+        "model": settings.model if settings else "",
         "llm_options": [{"id": r.id, "label": r.label, "provider": r.provider, "model": r.model}
                         for r in llms],
     }
 
 
 class SettingsIn(BaseModel):
-    llm_connection_id: str
+    llm_connection_id: str | None = None
+    model: str | None = None
 
 
 @router.patch("/settings", response_model=MessageSchema)
@@ -609,7 +612,12 @@ async def patch_settings(
     if not settings:
         settings = AgentSettings(user_id=user[0].id)
         session.add(settings)
-    settings.llm_connection_id = body.llm_connection_id
+    if body.llm_connection_id is not None:
+        settings.llm_connection_id = body.llm_connection_id
+        if body.model is None:
+            settings.model = ""  # switching connection resets model override unless provided
+    if body.model is not None:
+        settings.model = body.model.strip()[:128]
     settings.updated_at = utcnow()
     await session.commit()
     return MessageSchema(detail="updated")

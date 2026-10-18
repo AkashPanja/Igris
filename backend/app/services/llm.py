@@ -191,3 +191,50 @@ async def test_connection(row: LlmConnection, api_key: str) -> tuple[bool, str]:
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _openai_models(base: str, api_key: str) -> list[str]:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        r = await client.get(
+            base.rstrip("/") + "/models", headers={"Authorization": f"Bearer {api_key}"}
+        )
+        r.raise_for_status()
+        data = r.json().get("data") or []
+        return sorted({m.get("id") for m in data if m.get("id")})
+
+
+async def fetch_provider_models(
+    provider: str, api_key: str, base_url: str
+) -> tuple[list[str], str]:
+    """(models, source) — live listing from the provider API, static fallback on failure."""
+    static = list(PROVIDERS.get(provider, {}).get("models", []))
+    if not api_key:
+        return static, "static (no api key)"
+    try:
+        if provider == "anthropic":
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+                r = await client.get(
+                    "https://api.anthropic.com/v1/models?limit=100",
+                    headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+                )
+                r.raise_for_status()
+                ids = [m.get("id") for m in r.json().get("data") or [] if m.get("id")]
+            return (ids or static, "api")
+        if provider == "gemini":
+            base = PROVIDERS["gemini"]["base_url"]
+            async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+                r = await client.get(f"{base}/models?key={api_key}&pageSize=200")
+                r.raise_for_status()
+                ids = [
+                    m["name"].removeprefix("models/")
+                    for m in r.json().get("models") or []
+                    if "generateContent" in (m.get("supportedGenerationMethods") or [])
+                ]
+            return (ids or static, "api")
+        base = base_url.strip() or PROVIDERS.get(provider, {}).get("base_url") or ""
+        if not base:
+            return static, f"static (no base url for {provider})"
+        ids = await _openai_models(base, api_key)
+        return (ids or static, "api")
+    except Exception as exc:  # noqa: BLE001
+        return (static, f"static ({type(exc).__name__}: {exc})")

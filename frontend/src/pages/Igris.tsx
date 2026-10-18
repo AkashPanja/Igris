@@ -11,6 +11,7 @@ import {
   FileText,
   Loader2,
   Plus,
+  RefreshCw,
   ScrollText,
   Send,
   Settings2,
@@ -36,6 +37,7 @@ import {
   type JobRow,
   type MemoryGraph,
   type MemoryNote,
+  type ModelsResponse,
   type NotifRow,
   type ProposalRow,
   type SignalRow,
@@ -769,6 +771,10 @@ function SettingsView() {
   const [jobs, setJobs] = useState<JobRow[]>([])
   const [jobForm, setJobForm] = useState({ name: '', tool_name: 'research_symbol', symbol: '', interval_minutes: 30 })
   const [msg, setMsg] = useState('')
+  const [models, setModels] = useState<string[]>([])
+  const [modelSource, setModelSource] = useState('')
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [customModel, setCustomModel] = useState('')
 
   const refresh = useCallback(async () => {
     const [s, j] = await Promise.all([
@@ -776,8 +782,34 @@ function SettingsView() {
       api.get<JobRow[]>('/api/agent/jobs'),
     ])
     setSettings(s); setJobs(j)
+    setCustomModel(s.model && !models.includes(s.model) && models.length > 0 ? s.model : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-  useEffect(() => { void refresh() }, [refresh])
+
+  const loadModels = useCallback(async (connId: string) => {
+    if (!connId) { setModels([]); setModelSource(''); return }
+    setLoadingModels(true)
+    try {
+      const res = await api.post<ModelsResponse>('/api/llm/models', { conn_id: connId })
+      setModels(res.models)
+      setModelSource(res.source)
+    } catch {
+      setModels([]); setModelSource('load failed')
+    } finally { setLoadingModels(false) }
+  }, [])
+
+  useEffect(() => { void refresh().then(() => { if (settings?.llm_connection_id) void loadModels(settings.llm_connection_id) }) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function saveModel(value: string) {
+    setMsg('')
+    try {
+      await api.patch('/api/agent/settings', { model: value })
+      await refresh()
+      setMsg(`model → ${value || '(connection default)'}`)
+    } catch (e) { setMsg(e instanceof Error ? e.message : 'failed') }
+  }
+
+  const currentModel = settings?.model || settings?.llm_options.find((o) => o.id === settings?.llm_connection_id)?.model || ''
 
   async function addJob(e: React.FormEvent) {
     e.preventDefault()
@@ -801,16 +833,52 @@ function SettingsView() {
       <Card>
         <CardContent className="space-y-3 p-5">
           <p className="font-display text-sm font-semibold">Agent model</p>
-          <Select
-            value={settings?.llm_connection_id || ''}
-            onChange={async (e) => { await api.patch('/api/agent/settings', { llm_connection_id: e.target.value }); void refresh() }}
-          >
-            <option value="">Auto (first LLM connection)</option>
-            {(settings?.llm_options ?? []).map((o) => (
-              <option key={o.id} value={o.id}>{o.label} · {o.provider} · {o.model}</option>
-            ))}
-          </Select>
+          <div className="space-y-1">
+            <Label>Connection</Label>
+            <Select
+              value={settings?.llm_connection_id || ''}
+              onChange={async (e) => {
+                await api.patch('/api/agent/settings', { llm_connection_id: e.target.value, model: '' })
+                setCustomModel('')
+                await refresh()
+                await loadModels(e.target.value)
+              }}
+            >
+              <option value="">Auto (first LLM connection)</option>
+              {(settings?.llm_options ?? []).map((o) => (
+                <option key={o.id} value={o.id}>{o.label} · {o.provider}</option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <Label>Model {currentModel && <span className="text-slate-400">· now: {settings?.model || 'default'}</span>}</Label>
+              <Button size="sm" variant="outline" onClick={() => settings?.llm_connection_id && loadModels(settings.llm_connection_id)} disabled={loadingModels || !settings?.llm_connection_id}>
+                {loadingModels ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                Load models
+              </Button>
+            </div>
+            <Select
+              value={customModel ? '__custom__' : currentModel || ''}
+              onChange={(e) => {
+                if (e.target.value === '__custom__') { setCustomModel(currentModel); return }
+                void saveModel(e.target.value)
+              }}
+            >
+              <option value="" disabled>{currentModel ? currentModel : 'select a model…'}</option>
+              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+              <option value="__custom__">Custom model id…</option>
+            </Select>
+            {customModel && (
+              <div className="flex gap-2">
+                <Input value={customModel} onChange={(e) => setCustomModel(e.target.value)} placeholder="model id" />
+                <Button size="sm" onClick={() => saveModel(customModel)} disabled={!customModel.trim()}>Save</Button>
+              </div>
+            )}
+            {modelSource && <p className="text-[10px] text-slate-400">source: {modelSource}</p>}
+          </div>
           <p className="text-[11px] text-slate-400">Add or edit connections on the LLM tab.</p>
+          {msg && <p className="text-xs text-brand-600">{msg}</p>}
         </CardContent>
       </Card>
       <Card>

@@ -21,6 +21,7 @@ import {
   type LlmConnection,
   type LlmProvider,
   type LlmProviderInfo,
+  type ModelsResponse,
   type TestResult,
 } from '@/lib/api'
 
@@ -51,6 +52,9 @@ function AddLlmForm({
   const [baseUrl, setBaseUrl] = useState('')
   const [model, setModel] = useState('')
   const [customModel, setCustomModel] = useState('')
+  const [loadedModels, setLoadedModels] = useState<string[] | null>(null)
+  const [loadingModels, setLoadingModels] = useState(false)
+  const [modelSource, setModelSource] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -104,6 +108,8 @@ function AddLlmForm({
                   const p = config.providers.find((x) => x.id === e.target.value)
                   setModel(p?.models[0] || '__custom__')
                   setCustomModel('')
+                  setLoadedModels(null)
+                  setModelSource('')
                 }}
               >
                 {config.providers.map((p) => (
@@ -142,15 +148,44 @@ function AddLlmForm({
               )}
             </div>
             <div className="min-w-0 space-y-1.5">
-              <Label>Model</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label>Model</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={loadingModels || !apiKey}
+                  onClick={async () => {
+                    setLoadingModels(true)
+                    try {
+                      const res = await api.post<ModelsResponse>('/api/llm/models', {
+                        provider: providerId,
+                        api_key: apiKey,
+                        base_url: baseUrl,
+                      })
+                      setLoadedModels(res.models)
+                      setModelSource(res.source)
+                      if (res.models.length && model !== '__custom__') setModel(res.models[0])
+                    } catch {
+                      setModelSource('load failed')
+                    } finally {
+                      setLoadingModels(false)
+                    }
+                  }}
+                >
+                  {loadingModels ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Load models
+                </Button>
+              </div>
               <Select value={model} onChange={(e) => setModel(e.target.value)}>
-                {info?.models.map((m) => (
+                {(loadedModels ?? info?.models ?? []).map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
                 ))}
                 <option value="__custom__">Custom…</option>
               </Select>
+              {modelSource && <p className="text-[10px] text-slate-400">{modelSource}</p>}
             </div>
             {model === '__custom__' && (
               <div className="min-w-0 space-y-1.5 sm:col-span-2">

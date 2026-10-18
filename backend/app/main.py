@@ -23,6 +23,16 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+        def _migrate(sync_conn):
+            # S4.1: agent_settings.model added after first deploy
+            rows = sync_conn.exec_driver_sql("PRAGMA table_info(agent_settings)").mappings().all()
+            if rows and "model" not in {r["name"] for r in rows}:
+                sync_conn.exec_driver_sql(
+                    "ALTER TABLE agent_settings ADD COLUMN model VARCHAR(128) DEFAULT ''"
+                )
+
+        await conn.run_sync(_migrate)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

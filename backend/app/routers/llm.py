@@ -126,3 +126,32 @@ async def test_llm(
     key = svc.load_key(row)
     ok, msg = await svc.test_connection(row, key)
     return {"success": ok, "message": msg}
+
+
+class ModelsIn(BaseModel):
+    """Load models for a saved connection (conn_id) or from raw form fields (before save)."""
+
+    conn_id: str | None = None
+    provider: str | None = None
+    api_key: str = ""
+    base_url: str = ""
+
+
+@router.post("/models")
+async def load_models(
+    body: ModelsIn,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(current_user),
+) -> dict:
+    if body.conn_id:
+        row = await svc.get_connection(session, user[0].id, body.conn_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Connection not found")
+        key = svc.load_key(row)
+        models, source = await svc.fetch_provider_models(row.provider, key, row.base_url)
+        return {"models": models, "source": source, "provider": row.provider}
+    provider = body.provider or "openai"
+    if provider not in svc.PROVIDERS:
+        raise HTTPException(status_code=422, detail="Unknown provider")
+    models, source = await svc.fetch_provider_models(provider, body.api_key, body.base_url)
+    return {"models": models, "source": source, "provider": provider}

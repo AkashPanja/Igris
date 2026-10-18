@@ -218,3 +218,28 @@ class TestMemoryAndChat:
         s = (await client.get("/api/agent/status")).json()
         assert s["mode"] == "paper" and s["kill_switch"] is False
         assert (await client.delete(f"/api/agent/jobs/{jobs[0]['id']}")).status_code == 200
+
+
+class TestModelSelection:
+    async def test_tc074_settings_model_override_used_by_chat(self, client, monkeypatch):
+        await _complete_setup(client)
+        await _make_llm(client)
+        r = await client.patch("/api/agent/settings", json={"model": "llama-3.1-8b-instant"})
+        assert r.status_code == 200
+        s = (await client.get("/api/agent/settings")).json()
+        assert s["model"] == "llama-3.1-8b-instant"
+
+        import app.services.agent.chat as chat_mod
+
+        seen = {}
+
+        async def fake_stream(provider, api_key, model, base_url, messages, tools=None):
+            seen["model"] = model
+            yield {"type": "text", "text": "ok"}
+            yield {"type": "done", "usage": None}
+
+        monkeypatch.setattr(chat_mod.llm_runtime, "stream_chat", fake_stream)
+        resp = await client.post("/api/agent/chat", json={"content": "hi"})
+        assert resp.status_code == 200
+        assert "llama-3.1-8b-instant" in resp.text  # meta event carries selected model
+        assert seen["model"] == "llama-3.1-8b-instant"
