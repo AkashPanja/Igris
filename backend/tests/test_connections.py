@@ -382,8 +382,11 @@ class TestFyersExpiry:
         after = datetime(2026, 10, 17, 7, 0, tzinfo=IST)
         exp2 = next_token_expiry(after)
         assert exp2 == datetime(2026, 10, 18, 6, 30, tzinfo=IST).astimezone(timezone.utc)
-        # always in the future relative to now
-        assert exp > datetime.now(timezone.utc) - timedelta(days=1)
+        # always in the future relative to the evaluated moment (date-independent)
+        assert exp > before.astimezone(timezone.utc)
+        assert exp2 > after.astimezone(timezone.utc)
+        # default call (wall clock now) is always in the future
+        assert next_token_expiry() > datetime.now(timezone.utc)
 
 
 class TestFyersCallbackParams:

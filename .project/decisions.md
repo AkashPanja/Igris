@@ -32,3 +32,11 @@
 - New table llm_connections (provider, encrypted api_key, base_url, model). Providers: openai, anthropic, gemini, groq, openrouter, custom (OpenAI-compatible base URL).
 - Test = real tiny call per provider (chat/messages/generateContent), key masked in UI like broker tokens.
 - Tab "LLM" at /llm; model select from static lists + custom id; keys stored for future assistant/insight features.
+
+## 2026-10-18 — S4: Igris agent (paper-inspired, not a merge)
+- Chat agent with tools; deterministic Risk Manager/paper engine per research paper §4.2. Hard caps in code (trading.HARD_CAPS), not DB.
+- Mode: paper default. Live = website-only, type "LIVE" to enable, autonomy live_approve default (live_auto available). Kill switch closes all + forces paper. Chat cannot change mode/kill (paper §6.3).
+- Memory = tables the site renders 1:1 (paper §5); graph v1 = linked notes→entities edges + neighbor list, force-viz later.
+- Costs: brokerage ₹20 + STT (2026 rates) + 0.0029% exchange + 18% GST + slippage (5bps equity/10bps F&O). Notify-on-long: side=BUY → in-app + email.
+- Tools needing write get 15-min confirm tokens; apply handlers never exposed to the model.
+- Scheduler: monitor tick (stop/target/EOD square-off) + user interval jobs (allowed tools whitelist, no propose_trade in jobs).
