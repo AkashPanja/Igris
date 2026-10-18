@@ -15,6 +15,18 @@ from app.services.llm import load_key
 MAX_TURNS = 8
 HISTORY_WINDOW = 24
 
+
+def _usage_tokens(u: dict[str, Any] | None) -> tuple[int, int]:
+    """Normalise usage dicts across providers (openai/anthropic/gemini shapes)."""
+    if not isinstance(u, dict):
+        return 0, 0
+    prompt = u.get("prompt_tokens") or u.get("input_tokens") or u.get("promptTokenCount") or 0
+    completion = u.get("completion_tokens") or u.get("output_tokens") or u.get("candidatesTokenCount") or 0
+    try:
+        return int(prompt or 0), int(completion or 0)
+    except (TypeError, ValueError):
+        return 0, 0
+
 SYSTEM_TEMPLATE = """You are Igris, the user's personal trading agent for Indian markets (NSE/BSE, intraday + F&O).
 
 ## Hard safety rules (never break)
@@ -35,6 +47,7 @@ SYSTEM_TEMPLATE = """You are Igris, the user's personal trading agent for Indian
 
 ## Style
 - Be concise and direct. Numbers over adjectives.
+- Background team: Scout and Reporter run on schedules (status on Igris → Agents); Risk/Executor/Monitor are always-on code. News/Macro/Analyst workers are planned for a later phase — say so if asked.
 - When you call tools, briefly say what you found afterwards.
 - For trade ideas: use research_symbol/get_quote first, then write_note or add_signal, then propose_trade. Never propose without a stop.
 - Memory is shared and user-editable: write notes with entities (symbols) so the graph links them.
@@ -117,6 +130,8 @@ async def run_chat(
     tools = tool_specs_for_llm()
     final_text_parts: list[str] = []
     transcript: list[dict[str, Any]] = []
+    total_prompt = 0
+    total_completion = 0
 
     for _turn in range(MAX_TURNS):
         stream_text: list[str] = []
@@ -128,6 +143,10 @@ async def run_chat(
                 yield ev
             elif ev["type"] == "tool_calls":
                 tool_calls = ev["tool_calls"]
+            elif ev["type"] == "done":
+                p, c = _usage_tokens(ev.get("usage"))
+                total_prompt += p
+                total_completion += c
             elif ev["type"] == "error":
                 had_error = True
                 yield ev
@@ -176,5 +195,12 @@ async def run_chat(
     )
     session.add(row)
     conversation.updated_at = utcnow()
+    if total_prompt or total_completion:
+        from app.models import UsageLog
+
+        session.add(UsageLog(
+            user_id=user.id, agent="chat", model=model,
+            prompt_tokens=total_prompt, completion_tokens=total_completion,
+        ))
     await session.commit()
     yield {"type": "done", "message_id": row.id, "title": conversation.title}

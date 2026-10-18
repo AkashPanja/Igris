@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   AlertTriangle,
+  BarChart3,
   Bell,
   Bot,
   Check,
@@ -11,12 +12,14 @@ import {
   FileText,
   Loader2,
   Plus,
+  Radar,
   RefreshCw,
   ScrollText,
   Send,
   Settings2,
   ShieldAlert,
   Trash2,
+  Users,
   Wallet,
   X,
 } from 'lucide-react'
@@ -29,6 +32,7 @@ import { Select } from '@/components/ui/select'
 import {
   api,
   type AgentRules,
+  type AgentRoster,
   type AgentSettingsInfo,
   type AgentStatus,
   type AuditRow,
@@ -47,6 +51,7 @@ import {
 
 const TABS = [
   { id: 'chat', label: 'Chat', icon: Bot },
+  { id: 'agents', label: 'Agents', icon: Users },
   { id: 'memory', label: 'Memory', icon: FileText },
   { id: 'rules', label: 'Rules', icon: ShieldAlert },
   { id: 'trades', label: 'Trades', icon: Wallet },
@@ -766,6 +771,130 @@ function NotifsView() {
   )
 }
 
+const FAMILY_ICON: Record<string, React.ElementType> = {
+  research: Radar, safety: ShieldAlert, review: BarChart3, memory: Bot,
+}
+
+function ago(iso: string | null): string {
+  if (!iso) return 'never'
+  const ms = Date.now() - new Date(iso).getTime()
+  if (ms < 60_000) return 'just now'
+  const m = Math.floor(ms / 60_000)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
+
+function AgentsView() {
+  const [roster, setRoster] = useState<AgentRoster | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+
+  const load = useCallback(() => {
+    api.get<AgentRoster>('/api/agent/agents')
+      .then(setRoster)
+      .catch((e) => setErr(e instanceof Error ? e.message : 'failed to load'))
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  async function toggle(name: string, enabled: boolean) {
+    setBusy(name); setErr('')
+    try {
+      await api.patch(`/api/agent/agents/${name}`, { enabled })
+      load()
+    } catch (e) { setErr(e instanceof Error ? e.message : 'failed') }
+    finally { setBusy('') }
+  }
+
+  const u = roster?.usage_today
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-400">
+        <span className="font-medium text-slate-300">Igris team (paper §4.1)</span>
+        {u && (
+          <span>
+            today: {u.calls} LLM call{u.calls === 1 ? '' : 's'} ·{' '}
+            {(u.prompt_tokens + u.completion_tokens).toLocaleString()} tokens
+          </span>
+        )}
+        <Button size="sm" variant="outline" onClick={load}>
+          <RefreshCw className="h-3.5 w-3.5" /> Refresh
+        </Button>
+      </div>
+      {err && <p className="text-xs text-red-400">{err}</p>}
+      {!roster && !err && <p className="text-sm text-slate-400">Loading team…</p>}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {(roster?.agents ?? []).map((a) => {
+          const Icon = FAMILY_ICON[a.family] ?? Bot
+          const planned = Boolean(a.planned)
+          return (
+            <Card key={a.name} className={planned ? 'opacity-70' : ''}>
+              <CardContent className="space-y-2 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-md bg-slate-800 p-1.5">
+                      <Icon className="h-4 w-4 text-slate-300" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold leading-tight">{a.label}</p>
+                      <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                        {a.kind === 'llm' ? 'LLM' : 'code'} · {a.family}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className={
+                      'rounded-full px-2 py-0.5 text-[10px] font-medium ' +
+                      (planned
+                        ? 'bg-amber-500/15 text-amber-300'
+                        : a.status === 'error'
+                          ? 'bg-red-500/15 text-red-300'
+                          : a.status === 'ok'
+                            ? 'bg-emerald-500/15 text-emerald-300'
+                            : 'bg-slate-500/15 text-slate-400')
+                    }
+                  >
+                    {planned ? 'phase 2' : a.status === 'never' ? 'waiting' : a.status}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300">{a.role}</p>
+                <p className="text-[10px] text-slate-500">⏱ {a.schedule}</p>
+                {planned && <p className="text-[10px] text-amber-400/80">{a.planned}</p>}
+                {a.last_detail && !planned && (
+                  <p className="line-clamp-2 rounded bg-slate-900/60 p-1.5 text-[10px] text-slate-400">
+                    {a.last_detail}
+                  </p>
+                )}
+                <div className="flex items-center justify-between border-t border-slate-800 pt-2 text-[11px] text-slate-500">
+                  <span>
+                    {a.last_run_at ? `ran ${ago(a.last_run_at)}` : 'not run yet'}
+                    {a.rows_today > 0 && ` · ${a.rows_today} rows today`}
+                  </span>
+                  {!planned && (a.name === 'scout' || a.name === 'news' || a.name === 'macro' || a.name === 'analyst' || a.name === 'reporter') && (
+                    <Button
+                      size="sm"
+                      variant={a.enabled ? 'outline' : 'default'}
+                      disabled={busy === a.name}
+                      onClick={() => toggle(a.name, !a.enabled)}
+                    >
+                      {a.enabled ? 'On' : 'Off'}
+                    </Button>
+                  )}
+                  {!planned && !['scout', 'news', 'macro', 'analyst', 'reporter'].includes(a.name) && (
+                    <span className="text-slate-500">always on</span>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+
 function SettingsView() {
   const [settings, setSettings] = useState<AgentSettingsInfo | null>(null)
   const [jobs, setJobs] = useState<JobRow[]>([])
@@ -1003,6 +1132,7 @@ export default function IgrisPage() {
         </motion.div>
 
         {tab === 'chat' && <ChatView />}
+        {tab === 'agents' && <AgentsView />}
         {tab === 'memory' && <MemoryView />}
         {tab === 'rules' && <RulesView onChanged={refreshStatus} />}
         {tab === 'trades' && <TradesView />}

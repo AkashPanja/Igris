@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
 from app.models import (
+    AgentRun,
     AgentSettings,
     AuditLog,
     ConfirmToken,
@@ -23,6 +25,7 @@ from app.models import (
     Proposal,
     ResearchNote,
     Signal,
+    UsageLog,
     User,
     WatchlistItem,
     utcnow,
@@ -621,3 +624,127 @@ async def patch_settings(
     settings.updated_at = utcnow()
     await session.commit()
     return MessageSchema(detail="updated")
+
+
+# ------------------------------------------------------------ agents roster
+
+
+@router.get("/agents")
+async def agent_roster(session: AsyncSession = Depends(get_session), user=Depends(current_user)):
+    """The full paper §4.1 team: workers with run state + always-on code agents."""
+    from app.services.agent import workers
+
+    uid = user[0].id
+    enabled = workers.enabled_map(await session.get(AgentSettings, uid))
+
+    # latest runs per worker (scout/reporter/... phase-1; planned ones show none)
+    runs: dict[str, Any] = {}
+    for r in (await session.execute(
+        select(AgentRun).where(AgentRun.user_id == uid)
+        .order_by(AgentRun.started_at.desc()).limit(50)
+    )).scalars():
+        runs.setdefault(r.worker, r)
+
+    today_start = workers._ist_today_start(utcnow())
+    rows_today: dict[str, int] = {}
+    for worker, cnt in (await session.execute(
+        select(AgentRun.worker, func.sum(AgentRun.rows_written))
+        .where(AgentRun.user_id == uid, AgentRun.started_at >= today_start)
+        .group_by(AgentRun.worker)
+    )).all():
+        rows_today[worker] = int(cnt or 0)
+
+    # chat last activity
+    last_chat = (await session.execute(
+        select(func.max(Message.created_at))
+        .join(Conversation, Conversation.id == Message.conversation_id)
+        .where(Conversation.user_id == uid, Message.role == "assistant")
+    )).scalar()
+
+    # always-on code agents: last audit activity
+    audit_rows = (await session.execute(
+        select(AuditLog.action, func.max(AuditLog.created_at))
+        .where(AuditLog.user_id == uid, AuditLog.actor.in_(("monitor", "executor")))
+        .group_by(AuditLog.action)
+    )).all()
+    code_last: dict[str, datetime] = {}
+    for action, ts in audit_rows:
+        ts = workers.as_utc(ts)
+        if ts:
+            actor = "monitor" if action.startswith("trade_closed") else "executor"
+            if code_last.get(actor) is None or ts > code_last[actor]:
+                code_last[actor] = ts
+    risk_last = workers.as_utc((await session.execute(
+        select(func.max(AuditLog.created_at))
+        .where(AuditLog.user_id == uid, AuditLog.action.like("risk_%"))
+    )).scalar())
+
+    out = []
+    for defn in workers.WORKER_DEFS:
+        name = defn["name"]
+        card = dict(defn)
+        card["enabled"] = enabled.get(name, True)
+        card["planned"] = defn.get("planned", "")
+        card["status"] = "never"
+        card["last_run_at"] = None
+        card["rows_today"] = 0
+        card["last_detail"] = ""
+        if name == "chat":
+            last = workers.as_utc(last_chat)
+            card["status"] = "ok" if last else "never"
+            card["last_run_at"] = last.isoformat() if last else None
+        elif name in workers.TOGGLEABLE:
+            run = runs.get(name)
+            if run:
+                card["status"] = run.status
+                card["last_run_at"] = workers.as_utc(run.started_at).isoformat()
+                card["last_detail"] = (run.detail or "")[:300]
+            card["rows_today"] = rows_today.get(name, 0)
+        else:  # risk / executor / monitor — always on
+            card["status"] = "ok"
+            last = code_last.get(name) or (risk_last if name == "risk" else None)
+            card["last_run_at"] = last.isoformat() if last else None
+            if name == "monitor":
+                card["last_detail"] = "checking stops/targets every 60s"
+            elif name == "risk":
+                card["last_detail"] = "hard caps: 2% risk · 5 positions · 3% daily loss"
+            else:
+                card["last_detail"] = "paper fills / live orders on approval"
+        out.append(card)
+
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+    for p, c, n in (await session.execute(
+        select(func.sum(UsageLog.prompt_tokens), func.sum(UsageLog.completion_tokens), func.count(UsageLog.id))
+        .where(UsageLog.user_id == uid, UsageLog.created_at >= today_start)
+    )).all():
+        usage = {"prompt_tokens": int(p or 0), "completion_tokens": int(c or 0), "calls": int(n or 0)}
+    return {"agents": out, "usage_today": usage}
+
+
+class WorkerToggleIn(BaseModel):
+    enabled: bool
+
+
+@router.patch("/agents/{name}", response_model=MessageSchema)
+async def toggle_worker(
+    name: str, body: WorkerToggleIn,
+    session: AsyncSession = Depends(get_session), user=Depends(current_user),
+):
+    from app.services.agent import workers
+
+    if name not in workers.TOGGLEABLE:
+        raise HTTPException(status_code=422, detail="worker not toggleable")
+    settings = await session.get(AgentSettings, user[0].id)
+    if not settings:
+        settings = AgentSettings(user_id=user[0].id)
+        session.add(settings)
+    enabled = workers.enabled_map(settings)
+    enabled[name] = body.enabled
+    settings.workers_enabled = json.dumps(enabled)
+    settings.updated_at = utcnow()
+    await trading.audit(
+        session, user[0].id, "user",
+        "worker_enabled" if body.enabled else "worker_disabled", name,
+    )
+    await session.commit()
+    return MessageSchema(detail=f"{name} {'enabled' if body.enabled else 'disabled'}")

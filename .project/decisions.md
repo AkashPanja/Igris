@@ -40,3 +40,13 @@
 - Costs: brokerage ₹20 + STT (2026 rates) + 0.0029% exchange + 18% GST + slippage (5bps equity/10bps F&O). Notify-on-long: side=BUY → in-app + email.
 - Tools needing write get 15-min confirm tokens; apply handlers never exposed to the model.
 - Scheduler: monitor tick (stop/target/EOD square-off) + user interval jobs (allowed tools whitelist, no propose_trade in jobs).
+
+## 2026-10-18 — S5 phase 1: agent team per research paper §4.1
+- Roster shows all nine paper agents; only Main chat is conversational — Scout/Reporter are scheduled code workers (phase 1), News/Macro/Analyst planned as LLM workers (phase 2), Risk/Executor/Monitor always-on code.
+- Data sources (user-approved, ₹0): NSE nsepython (allIndices + marketStatus work from this IP; per-stock/quote endpoints 403 blocked → broker APIs are primary for quotes), free Indian RSS for news phase 2, Yahoo-style free macro phase 2. NSE blocked from server IP even with browser impersonation (curl_cffi).
+- New tables: agent_runs (worker run history), usage_log (tokens per agent/chat); agent_settings.workers_enabled JSON column (SQLite ALTER migration in init_db).
+- Scout: watchlist batch quotes (Fyers → Groww fallback) → ≥3% vs prev close tags a Signal (created_by=scout, expires 15:30 IST, dedup per symbol/day) + NSE index snapshot in run detail.
+- Reporter (15:35 IST): daily lesson (metric daily:YYYY-MM-DD, dedup) + rolling30 expectancy row + memory expiry sweep (unpinned notes + expired signals + their edges).
+- BUG FIX (critical): scheduler tick crashed on naive SQLite datetimes ("can't compare offset-naive and offset-aware") — monitor + jobs were dead in production; now normalised via as_utc()/tz-aware compare everywhere.
+- BUG FIX: trading._broker_client used GrowwAPI(api_key=...) — constructor takes only token; Groww fallback in quotes/live orders never worked. Now uses brokers.groww.client().
+- Groww needs_auth now auto-recovers via silent TOTP re-login (once; failure → error + email). Fyers still requires OAuth click.

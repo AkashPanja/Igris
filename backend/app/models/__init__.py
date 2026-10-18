@@ -298,6 +298,7 @@ class AgentSettings(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     llm_connection_id: Mapped[str] = mapped_column(String(64), default="")
     model: Mapped[str] = mapped_column(String(128), default="")  # override; empty = connection's model
+    workers_enabled: Mapped[str] = mapped_column(Text, default="")  # JSON {scout: true, ...}; empty = defaults
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -312,3 +313,28 @@ class ConfirmToken(Base):
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AgentRun(Base):
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    worker: Mapped[str] = mapped_column(String(32), index=True)  # scout | reporter | news | macro | analyst
+    status: Mapped[str] = mapped_column(String(16), default="ok")  # ok | error
+    rows_written: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UsageLog(Base):
+    __tablename__ = "usage_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    agent: Mapped[str] = mapped_column(String(32), default="chat")  # chat | news | macro | analyst
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)

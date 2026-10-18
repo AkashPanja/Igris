@@ -30,6 +30,11 @@ async def init_db() -> None:
                 sync_conn.exec_driver_sql(
                     "ALTER TABLE agent_settings ADD COLUMN model VARCHAR(128) DEFAULT ''"
                 )
+            # S5: worker enable-flags per user (JSON dict, empty = defaults)
+            if rows and "workers_enabled" not in {r["name"] for r in rows}:
+                sync_conn.exec_driver_sql(
+                    "ALTER TABLE agent_settings ADD COLUMN workers_enabled TEXT DEFAULT ''"
+                )
 
         await conn.run_sync(_migrate)
 

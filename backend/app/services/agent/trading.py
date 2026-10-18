@@ -252,9 +252,9 @@ async def _broker_client(session: AsyncSession, user_id: int, provider: str):
 
         return fyers_client(conn.app_id, token), None
     if provider == "groww":
-        from growwapi import GrowwAPI
+        from app.services.brokers.groww import client as groww_client
 
-        return GrowwAPI(api_key=conn.app_id, access_token=token), None
+        return groww_client(token), None
     return None, f"Unknown broker {provider}"
 
 

@@ -243,3 +243,198 @@ class TestModelSelection:
         assert resp.status_code == 200
         assert "llama-3.1-8b-instant" in resp.text  # meta event carries selected model
         assert seen["model"] == "llama-3.1-8b-instant"
+
+
+class TestS5Workers:
+    """S5: background agent team (paper §4.1) — roster, scout, reporter, expiry."""
+
+    async def test_tc075_roster_returns_full_paper_team(self, client):
+        await _complete_setup(client)
+        r = await client.get("/api/agent/agents")
+        assert r.status_code == 200
+        body = r.json()
+        names = [a["name"] for a in body["agents"]]
+        assert names == ["chat", "scout", "news", "macro", "analyst",
+                         "risk", "executor", "monitor", "reporter"]
+        planned = {a["name"] for a in body["agents"] if a.get("planned")}
+        assert planned == {"news", "macro", "analyst"}
+        scout = next(a for a in body["agents"] if a["name"] == "scout")
+        assert scout["enabled"] is True and scout["status"] == "never"
+        assert "08:30" in scout["schedule"]
+        risk = next(a for a in body["agents"] if a["name"] == "risk")
+        assert risk["enabled"] is True and risk["kind"] == "code"
+        assert body["usage_today"] == {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+
+    async def test_tc076_toggle_worker_persists_and_rejects_code_agents(self, client):
+        await _complete_setup(client)
+        r = await client.patch("/api/agent/agents/scout", json={"enabled": False})
+        assert r.status_code == 200
+        scout = next(a for a in (await client.get("/api/agent/agents")).json()["agents"]
+                     if a["name"] == "scout")
+        assert scout["enabled"] is False
+        # code agents are not toggleable
+        assert (await client.patch("/api/agent/agents/monitor", json={"enabled": False})).status_code == 422
+        assert (await client.patch("/api/agent/agents/nope", json={"enabled": True})).status_code == 422
+        # audit trail
+        audit = (await client.get("/api/agent/audit")).json()
+        assert any(a["action"] == "worker_disabled" and a["detail"] == "scout" for a in audit)
+
+    async def test_tc077_scout_tags_signals_with_dedup(self, client, monkeypatch):
+        import app.services.agent.workers as W
+        from sqlalchemy import select
+
+        from app.models import Signal, User, WatchlistItem
+
+        async def fake_idx():
+            return {"NIFTY 50": (23000.0, 0.5)}, "NIFTY 50 23,000 (+0.50%)"
+
+        monkeypatch.setattr(W, "_nse_index_snapshot", fake_idx)
+
+        await _complete_setup(client)
+        async with SessionLocal() as session:
+            user = (await session.execute(select(User))).scalars().first()
+            session.add(WatchlistItem(user_id=user.id, symbol="RELIANCE"))
+            await session.commit()
+
+            async def fake_quotes(sess, uid, syms):
+                return {"RELIANCE": (3000.0, 2800.0)}  # +7.1% ≥ 3% threshold
+
+            rows, detail = await W.run_scout(session, user.id, quotes_fn=fake_quotes)
+            await session.commit()
+            assert rows == 1
+            assert "NIFTY 50" in detail and "RELIANCE" in detail
+
+            rows2, _ = await W.run_scout(session, user.id, quotes_fn=fake_quotes)
+            await session.commit()
+            assert rows2 == 0  # dedup: one scout signal per symbol per day
+
+            sigs = list((await session.execute(
+                select(Signal).where(Signal.user_id == user.id))).scalars())
+            assert len(sigs) == 1
+            s = sigs[0]
+            assert s.created_by == "scout" and s.direction == "long" and s.source == "agent"
+            assert s.expires_at is not None and s.score >= 0.5
+
+    async def test_tc078_reporter_daily_and_rolling_lessons(self, client):
+        import app.services.agent.workers as W
+        from sqlalchemy import select
+
+        from app.models import Lesson, Trade, User, utcnow
+
+        await _complete_setup(client)
+        async with SessionLocal() as session:
+            user = (await session.execute(select(User))).scalars().first()
+            session.add(Trade(
+                id="tc078trade1", user_id=user.id, symbol="RELIANCE", side="BUY",
+                instrument="equity_intraday",
+                qty=10, entry_px=100.0, exit_px=110.0, pnl=1000.0, status="closed",
+                closed_at=utcnow(), mode="paper",
+            ))
+            await session.commit()
+
+            rows, detail = await W.run_reporter(session, user.id)
+            await session.commit()
+            assert rows >= 2 and "1 closed" in detail
+
+            lessons = list((await session.execute(
+                select(Lesson).where(Lesson.user_id == user.id))).scalars())
+            daily = [l for l in lessons if l.metric.startswith("daily:")]
+            rolling = [l for l in lessons if l.metric == "rolling30"]
+            assert len(daily) == 1 and "1 wins" in daily[0].body and "net ₹1,000" in daily[0].body
+            assert len(rolling) == 1 and "expectancy ₹1,000" in rolling[0].body
+
+            # second run: no duplicate daily lesson
+            await W.run_reporter(session, user.id)
+            await session.commit()
+            lessons = list((await session.execute(
+                select(Lesson).where(Lesson.user_id == user.id))).scalars())
+            assert sum(1 for l in lessons if l.metric.startswith("daily:")) == 1
+
+    async def test_tc079_expiry_removes_stale_keeps_pinned(self, client):
+        import app.services.agent.workers as W
+        from datetime import timedelta
+
+        from sqlalchemy import select
+
+        from app.models import MemoryEdge, ResearchNote, Signal, User, utcnow
+
+        await _complete_setup(client)
+        async with SessionLocal() as session:
+            user = (await session.execute(select(User))).scalars().first()
+            past = utcnow() - timedelta(hours=1)
+            session.add(ResearchNote(id="note-exp", user_id=user.id, title="intraday",
+                                     expires_at=past))
+            session.add(ResearchNote(id="note-pin", user_id=user.id, title="keep me",
+                                     pinned=True, expires_at=past))
+            session.add(ResearchNote(id="note-new", user_id=user.id, title="future",
+                                     expires_at=utcnow() + timedelta(hours=2)))
+            session.add(ResearchNote(id="forever", user_id=user.id, title="no expiry"))
+            session.add(Signal(user_id=user.id, symbol="TCS", created_by="scout",
+                               expires_at=past))
+            session.add(MemoryEdge(user_id=user.id, from_kind="note", from_id="note-exp",
+                                   to_kind="entity", to_id="TCS", rel="mentions"))
+            await session.commit()
+
+            rows, detail = await W.run_expiry(session, user.id)
+            await session.commit()
+            assert rows == 2  # 1 note + 1 signal
+
+            note_ids = set((await session.execute(select(ResearchNote.id))).scalars())
+            assert note_ids == {"note-pin", "note-new", "forever"}
+            assert (await session.execute(select(Signal))).scalars().all() == []
+            edges = list((await session.execute(select(MemoryEdge))).scalars())
+            assert edges == []  # orphan edge cleaned
+
+    async def test_tc080_scheduler_tolerates_naive_expires_at(self, client, monkeypatch):
+        """Regression: a naive SQLite expires_at crashed the whole scheduler tick."""
+        from datetime import datetime, timezone
+
+        import app.services.agent.workers as W
+        import app.services.scheduler as sched
+
+        from sqlalchemy import select as sa_select
+
+        from app.models import Connection, User
+
+        async def noop(*a, **k):
+            return None
+
+        monkeypatch.setattr(W, "tick", noop)
+
+        await _complete_setup(client)
+        async with SessionLocal() as session:
+            user = (await session.execute(sa_select(User))).scalars().first()
+            session.add(Connection(
+                id="conn-naive", user_id=user.id, provider="groww", app_id="key",
+                credentials="{}", status="connected",
+                expires_at=datetime(2026, 1, 1, 12, 0, 0),  # naive + long past
+                reauth_time="23:59", last_reauth_at=datetime.now(timezone.utc),
+            ))
+            await session.commit()
+
+        await sched.tick()  # must not raise
+
+        async with SessionLocal() as session:
+            conn = await session.get(Connection, "conn-naive")
+            assert conn.status == "needs_auth"
+
+    async def test_tc081_chat_logs_token_usage(self, client, monkeypatch):
+        await _complete_setup(client)
+        await _make_llm(client)
+
+        import app.services.agent.chat as chat_mod
+
+        async def fake_stream(provider, api_key, model, base_url, messages, tools=None):
+            yield {"type": "text", "text": "hi"}
+            yield {"type": "done", "usage": {"prompt_tokens": 120, "completion_tokens": 30}}
+
+        monkeypatch.setattr(chat_mod.llm_runtime, "stream_chat", fake_stream)
+        resp = await client.post("/api/agent/chat", json={"content": "count my tokens"})
+        assert resp.status_code == 200
+
+        roster = (await client.get("/api/agent/agents")).json()
+        assert roster["usage_today"]["calls"] == 1
+        assert roster["usage_today"]["prompt_tokens"] == 120
+        assert roster["usage_today"]["completion_tokens"] == 30
+        chat_card = next(a for a in roster["agents"] if a["name"] == "chat")
+        assert chat_card["status"] == "ok" and chat_card["last_run_at"]

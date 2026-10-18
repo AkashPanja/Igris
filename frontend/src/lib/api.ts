@@ -263,6 +263,26 @@ export interface AgentSettingsInfo {
   llm_options: { id: string; label: string; provider: string; model: string }[]
 }
 
+export interface AgentCardInfo {
+  name: string
+  label: string
+  kind: 'llm' | 'code'
+  family: string
+  schedule: string
+  role: string
+  planned?: string
+  enabled: boolean
+  status: 'ok' | 'error' | 'never'
+  last_run_at: string | null
+  rows_today: number
+  last_detail: string
+}
+
+export interface AgentRoster {
+  agents: AgentCardInfo[]
+  usage_today: { prompt_tokens: number; completion_tokens: number; calls: number }
+}
+
 export interface MemoryGraph {
   nodes: { id: string; kind: 'note' | 'entity'; label: string; pinned: boolean; entities: string[] }[]
   edges: { from: string; to: string; rel: string }[]

@@ -119,16 +119,23 @@ async def _reauth(session, conn: Connection, user: User) -> None:
 
 
 async def _agent_tick(session) -> None:
-    """S4: paper monitor (stop/target/EOD) + interval jobs for each user."""
+    """S4: paper monitor (stop/target/EOD) + interval jobs; S5: worker agents."""
     from datetime import timedelta
 
     from app.models import CronJob, Rule, User as UserModel
     from app.services.agent import tools as agent_tools
     from app.services.agent import trading as agent_trading
+    from app.services.agent import workers as agent_workers
 
     users = (await session.execute(select(UserModel).where(UserModel.is_active == True))).scalars()  # noqa: E712
     now = datetime.now(timezone.utc)
     for user in users:
+        # S5: background workers (scout, reporter, ...) — independent of rules
+        try:
+            await agent_workers.tick(session, user.id, now=now)
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            log.warning("worker tick failed for user %s: %s", user.id, exc)
         rule = await session.get(Rule, user.id)
         if not rule:
             continue
@@ -145,7 +152,7 @@ async def _agent_tick(session) -> None:
         for job in jobs:
             if job.market_hours_only and not agent_trading.is_market_hours():
                 continue
-            last = job.last_run_at
+            last = agent_workers.as_utc(job.last_run_at)
             if last is not None and now - last < timedelta(minutes=job.interval_minutes):
                 continue
             try:
@@ -173,15 +180,24 @@ async def tick() -> None:
         rows = list(result.all())
         now_utc = datetime.now(timezone.utc)
         for conn, user in rows:
+            # SQLite returns naive datetimes — normalise before comparing (S5 fix:
+            # a naive expires_at raised TypeError and halted the whole tick loop)
+            expires = conn.expires_at
+            if expires is not None and expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
             # Expire tracking (independent of reauth time)
-            if conn.status == "connected" and conn.expires_at and conn.expires_at <= now_utc:
+            if conn.status == "connected" and expires and expires <= now_utc:
                 conn.status = "needs_auth"
                 conn.last_error = "Access token expired — re-authorize"
                 await session.commit()
                 await _send_reauth_email(session, user, conn, "access token expired")
                 continue
             if conn.status == "needs_auth":
-                # only re-evaluate via explicit reauth; keep waiting for user
+                # Groww can re-login silently (TOTP) — try once; failure flips it to
+                # "error" (excluded here) + emails the user. Fyers needs the OAuth
+                # click on the website, so just keep waiting.
+                if conn.provider == "groww":
+                    await _reauth(session, conn, user)
                 continue
             if _due_for_reauth(conn):
                 await _reauth(session, conn, user)

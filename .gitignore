@@ -29,3 +29,7 @@ frontend/dist/
 *.swp
 
 backend/.venv/
+
+# fyers SDK runtime logs
+backend/fyersApi.log
+backend/fyersRequests.log
