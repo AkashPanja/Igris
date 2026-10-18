@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import Base, engine
+from app.routers import agent as agent_router
 from app.routers import auth as auth_router
 from app.routers import connections as connections_router
 from app.routers import llm as llm_router
@@ -52,6 +53,7 @@ def create_app() -> FastAPI:
         connections_router.router, prefix="/api/connections", tags=["connections"]
     )
     app.include_router(llm_router.router, prefix="/api/llm", tags=["llm"])
+    app.include_router(agent_router.router, prefix="/api/agent", tags=["agent"])
 
     @app.get("/api/health")
     async def health() -> dict:

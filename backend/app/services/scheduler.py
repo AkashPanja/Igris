@@ -118,6 +118,51 @@ async def _reauth(session, conn: Connection, user: User) -> None:
         )
 
 
+async def _agent_tick(session) -> None:
+    """S4: paper monitor (stop/target/EOD) + interval jobs for each user."""
+    from datetime import timedelta
+
+    from app.models import CronJob, Rule, User as UserModel
+    from app.services.agent import tools as agent_tools
+    from app.services.agent import trading as agent_trading
+
+    users = (await session.execute(select(UserModel).where(UserModel.is_active == True))).scalars()  # noqa: E712
+    now = datetime.now(timezone.utc)
+    for user in users:
+        rule = await session.get(Rule, user.id)
+        if not rule:
+            continue
+        try:
+            await agent_trading.monitor_tick(session, user, rule)
+            await session.commit()
+        except Exception as exc:  # noqa: BLE001
+            await session.rollback()
+            log.warning("monitor tick failed for user %s: %s", user.id, exc)
+        # interval jobs
+        jobs = (await session.execute(
+            select(CronJob).where(CronJob.user_id == user.id, CronJob.enabled == True)  # noqa: E712
+        )).scalars()
+        for job in jobs:
+            if job.market_hours_only and not agent_trading.is_market_hours():
+                continue
+            last = job.last_run_at
+            if last is not None and now - last < timedelta(minutes=job.interval_minutes):
+                continue
+            try:
+                result = await agent_tools.execute_tool(
+                    session, user, job.tool_name, __import__("json").loads(job.args or "{}")
+                )
+                job.last_run_at = now
+                job.last_result = str(result)[:2000]
+                await session.commit()
+                log.info("job %s ran: %s", job.id, job.tool_name)
+            except Exception as exc:  # noqa: BLE001
+                await session.rollback()
+                job.last_result = f"error: {exc}"[:500]
+                await session.commit()
+                log.warning("job %s failed: %s", job.id, exc)
+
+
 async def tick() -> None:
     async with SessionLocal() as session:
         result = await session.execute(
@@ -140,6 +185,8 @@ async def tick() -> None:
                 continue
             if _due_for_reauth(conn):
                 await _reauth(session, conn, user)
+    async with SessionLocal() as session:
+        await _agent_tick(session)
 
 
 async def run_forever() -> None:

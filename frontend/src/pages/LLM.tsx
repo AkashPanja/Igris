@@ -30,6 +30,7 @@ const BADGES: Record<string, { text: string; cls: string }> = {
   gemini: { text: 'GM', cls: 'from-blue-500 to-indigo-600' },
   groq: { text: 'GQ', cls: 'from-fuchsia-500 to-purple-600' },
   openrouter: { text: 'OR', cls: 'from-slate-500 to-slate-700' },
+  cloudflare: { text: 'CF', cls: 'from-amber-500 to-orange-600' },
   custom: { text: 'CX', cls: 'from-sky-500 to-cyan-600' },
 }
 
@@ -101,7 +102,7 @@ function AddLlmForm({
                 onChange={(e) => {
                   setProviderId(e.target.value as LlmProvider)
                   const p = config.providers.find((x) => x.id === e.target.value)
-                  setModel(p?.models[0] || '')
+                  setModel(p?.models[0] || '__custom__')
                   setCustomModel('')
                 }}
               >

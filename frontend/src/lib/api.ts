@@ -96,7 +96,7 @@ export interface TestResult {
   message: string
 }
 
-export type LlmProvider = 'openai' | 'anthropic' | 'gemini' | 'groq' | 'openrouter' | 'custom'
+export type LlmProvider = 'openai' | 'anthropic' | 'gemini' | 'groq' | 'openrouter' | 'cloudflare' | 'custom'
 
 export interface LlmConnection {
   id: string
@@ -120,4 +120,164 @@ export interface LlmProviderInfo {
 
 export interface LlmConfig {
   providers: LlmProviderInfo[]
+}
+
+// ---------------- Igris agent (S4) ----------------
+
+export interface AgentRules {
+  capital: number
+  risk_per_trade_pct: number
+  max_open_positions: number
+  daily_loss_limit_pct: number
+  max_daily_trades: number
+  mode: 'paper' | 'live'
+  autonomy: 'paper' | 'live_approve' | 'live_auto'
+  instruments_allowed: string[]
+  strategy_id: string
+  kill_switch: boolean
+  notify_on_long: boolean
+  hard_caps?: Record<string, unknown>
+}
+
+export interface TradeRow {
+  id: string
+  proposal_id: string
+  symbol: string
+  side: string
+  instrument: string
+  expiry: string
+  strike: string
+  mode: 'paper' | 'live'
+  qty: number
+  entry_px: number
+  stop_px: number
+  target_px: number
+  exit_px: number | null
+  slippage: number
+  costs: number
+  pnl: number | null
+  status: string
+  exit_reason: string
+  broker_order_id: string
+  is_long: boolean
+  opened_at: string | null
+  closed_at: string | null
+}
+
+export interface ProposalRow {
+  id: string
+  symbol: string
+  side: string
+  instrument: string
+  expiry: string
+  strike: string
+  entry: number
+  stop: number
+  target: number
+  qty: number
+  rationale: string
+  confidence: number
+  source: string
+  status: string
+  veto_reason: string
+  mode: string
+  created_at: string | null
+}
+
+export interface MemoryNote {
+  id: string
+  title: string
+  body: string
+  sentiment: number | null
+  entities: string[]
+  sources: string[]
+  pinned: boolean
+  created_by: string
+  created_at: string
+}
+
+export interface WatchItem {
+  id: number
+  symbol: string
+  notes: string
+  source: string
+}
+
+export interface SignalRow {
+  id: number
+  symbol: string
+  direction: string
+  catalyst: string
+  score: number
+  source: string
+  created_by: string
+}
+
+export interface AuditRow {
+  id: number
+  actor: string
+  action: string
+  detail: string
+  created_at: string
+}
+
+export interface NotifRow {
+  id: number
+  kind: string
+  title: string
+  body: string
+  read: boolean
+  created_at: string
+}
+
+export interface JobRow {
+  id: string
+  name: string
+  tool_name: string
+  args: Record<string, unknown>
+  interval_minutes: number
+  market_hours_only: boolean
+  enabled: boolean
+  last_run_at: string | null
+  last_result: string
+}
+
+export interface ConversationRow {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ChatMsg {
+  id: number
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  content: string
+  tool_json: { name: string; args: Record<string, unknown>; result: Record<string, unknown> }[]
+  created_at: string
+}
+
+export interface AgentSettingsInfo {
+  llm_connection_id: string
+  llm_options: { id: string; label: string; provider: string; model: string }[]
+}
+
+export interface MemoryGraph {
+  nodes: { id: string; kind: 'note' | 'entity'; label: string; pinned: boolean; entities: string[] }[]
+  edges: { from: string; to: string; rel: string }[]
+}
+
+export interface AgentStatus {
+  mode: string
+  autonomy: string
+  kill_switch: boolean
+  market_open: boolean
+  capital: number
+  risk_per_trade_pct: number
+  daily_loss_limit_pct: number
+  max_open_positions: number
+  open_positions: number
+  open_trades: TradeRow[]
+  today_realised_pnl: number
+  broker_connections: { id: string; provider: string; status: string; label: string }[]
 }

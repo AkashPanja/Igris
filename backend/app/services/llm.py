@@ -50,6 +50,13 @@ PROVIDERS: dict[str, dict] = {
         "models": ["openai/gpt-4o", "anthropic/claude-sonnet-4", "meta-llama/llama-3.3-70b-instruct"],
         "docs": "https://openrouter.ai/settings/keys",
     },
+    "cloudflare": {
+        "label": "Cloudflare Workers AI",
+        "base_url": "",
+        "key_hint": "CF account token",
+        "models": [],
+        "docs": "https://developers.cloudflare.com/workers-ai/platform/openai-compatibility/",
+    },
     "custom": {
         "label": "OpenAI-compatible (custom)",
         "base_url": "",
@@ -169,9 +176,9 @@ async def test_connection(row: LlmConnection, api_key: str) -> tuple[bool, str]:
                 if r.status_code >= 400:
                     msg = (data.get("error") or {}).get("message") or f"HTTP {r.status_code}"
                     raise RuntimeError(msg)
-        elif provider == "custom":
+        elif provider in ("custom", "cloudflare"):
             if not row.base_url.strip():
-                return False, "Base URL required for custom provider"
+                return False, f"Base URL required for {provider} provider"
             await _openai_chat(row.base_url, api_key, model)
         else:  # openai | groq | openrouter — OpenAI-compatible chat
             base = PROVIDERS[provider]["base_url"]

@@ -11,6 +11,7 @@ import ResetPasswordPage from '@/pages/ResetPassword'
 import HomePage from '@/pages/Home'
 import ConnectionsPage from '@/pages/Connections'
 import LlmPage from '@/pages/LLM'
+import IgrisPage from '@/pages/Igris'
 
 function Spinner() {
   return (
@@ -105,6 +106,14 @@ function AppRoutes() {
         element={
           <RequireAuth>
             <LlmPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/igris"
+        element={
+          <RequireAuth>
+            <IgrisPage />
           </RequireAuth>
         }
       />

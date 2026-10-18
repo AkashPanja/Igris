@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 class CreateLlm(BaseModel):
-    provider: str = Field(pattern="^(openai|anthropic|gemini|groq|openrouter|custom)$")
+    provider: str = Field(pattern="^(openai|anthropic|gemini|groq|openrouter|cloudflare|custom)$")
     label: str = ""
     api_key: str = Field(min_length=1)
     base_url: str = ""
@@ -36,7 +36,7 @@ async def llm_config(user=Depends(current_user)) -> dict:
                 "label": meta["label"],
                 "key_hint": meta["key_hint"],
                 "models": meta["models"],
-                "base_url_required": pid == "custom",
+                "base_url_required": pid in ("custom", "cloudflare"),
                 "docs": meta["docs"],
             }
             for pid, meta in svc.PROVIDERS.items()
@@ -61,8 +61,8 @@ async def create_llm(
     meta = svc.PROVIDERS.get(body.provider)
     if not meta:
         raise HTTPException(status_code=422, detail="Unknown provider")
-    if body.provider == "custom" and not body.base_url.strip():
-        raise HTTPException(status_code=422, detail="Base URL is required for custom provider")
+    if body.provider in ("custom", "cloudflare") and not body.base_url.strip():
+        raise HTTPException(status_code=422, detail=f"Base URL is required for {body.provider} provider")
     row = svc.LlmConnection(
         id=svc.new_id(),
         user_id=user[0].id,

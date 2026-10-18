@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Bot, Cable, LayoutDashboard, LogOut } from 'lucide-react'
+import { Bot, Cable, LayoutDashboard, LogOut, Sparkles } from 'lucide-react'
 import { LogoMark } from '@/components/AuthLayout'
 import { Button } from '@/components/ui/button'
 import { useSession } from '@/hooks/useSession'
@@ -8,6 +8,7 @@ const TABS = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/connections', label: 'Trading Connection', icon: Cable },
   { to: '/llm', label: 'LLM', icon: Bot },
+  { to: '/igris', label: 'Igris', icon: Sparkles },
 ]
 
 export function AppHeader() {
