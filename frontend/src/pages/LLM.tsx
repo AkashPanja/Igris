@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ExternalLink,
   Loader2,
+  Pencil,
   Plus,
   Trash2,
   XCircle,
@@ -35,22 +36,25 @@ const BADGES: Record<string, { text: string; cls: string }> = {
   custom: { text: 'CX', cls: 'from-sky-500 to-cyan-600' },
 }
 
-/* ------------------------------- Add form ------------------------------- */
+/* --------------------------- Add / Edit form --------------------------- */
 
-function AddLlmForm({
+function LlmForm({
   config,
-  onCreated,
+  initial,
+  onSaved,
   onClose,
 }: {
   config: LlmConfig
-  onCreated: (id: string) => void
+  initial?: LlmConnection | null
+  onSaved: (id: string) => void
   onClose: () => void
 }) {
-  const [providerId, setProviderId] = useState<LlmProvider>('openai')
-  const [label, setLabel] = useState('')
+  const isEdit = Boolean(initial)
+  const [providerId, setProviderId] = useState<LlmProvider>(initial?.provider ?? 'openai')
+  const [label, setLabel] = useState(initial?.label ?? '')
   const [apiKey, setApiKey] = useState('')
-  const [baseUrl, setBaseUrl] = useState('')
-  const [model, setModel] = useState('')
+  const [baseUrl, setBaseUrl] = useState(initial?.base_url ?? '')
+  const [model, setModel] = useState(initial?.model ?? '')
   const [customModel, setCustomModel] = useState('')
   const [loadedModels, setLoadedModels] = useState<string[] | null>(null)
   const [loadingModels, setLoadingModels] = useState(false)
@@ -61,20 +65,51 @@ function AddLlmForm({
   const info: LlmProviderInfo =
     config.providers.find((p) => p.id === providerId) || config.providers[0]
   const modelValue = model === '__custom__' ? customModel.trim() : model
+  const modelOptions = Array.from(
+    new Set([...(loadedModels ?? info?.models ?? []), ...(initial?.model ? [initial.model] : [])]),
+  )
+
+  async function loadModels() {
+    setLoadingModels(true)
+    try {
+      const res = await api.post<ModelsResponse>('/api/llm/models',
+        isEdit && !apiKey.trim()
+          ? { conn_id: initial!.id }
+          : { provider: providerId, api_key: apiKey, base_url: baseUrl },
+      )
+      setLoadedModels(res.models)
+      setModelSource(res.source)
+      if (!isEdit && res.models.length && model !== '__custom__') setModel(res.models[0])
+    } catch {
+      setModelSource('load failed')
+    } finally {
+      setLoadingModels(false)
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
     setError('')
     try {
-      const res = await api.post<{ id: string }>('/api/llm', {
-        provider: providerId,
-        label,
-        api_key: apiKey,
-        base_url: baseUrl,
-        model: modelValue,
-      })
-      onCreated(res.id)
+      if (isEdit) {
+        await api.patch(`/api/llm/${initial!.id}`, {
+          label,
+          model: modelValue,
+          base_url: baseUrl,
+          ...(apiKey.trim() ? { api_key: apiKey.trim() } : {}),
+        })
+        onSaved(initial!.id)
+      } else {
+        const res = await api.post<{ id: string }>('/api/llm', {
+          provider: providerId,
+          label,
+          api_key: apiKey,
+          base_url: baseUrl,
+          model: modelValue,
+        })
+        onSaved(res.id)
+      }
       onClose()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed')
@@ -92,7 +127,9 @@ function AddLlmForm({
       <Card className="border-brand-500/30">
         <CardContent className="p-5 sm:p-6">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-display text-base font-semibold">Add LLM connection</h2>
+            <h2 className="font-display text-base font-semibold">
+              {isEdit ? `Edit LLM connection · ${initial!.label}` : 'Add LLM connection'}
+            </h2>
             <Button variant="ghost" size="sm" onClick={onClose}>
               Cancel
             </Button>
@@ -101,23 +138,29 @@ function AddLlmForm({
           <form onSubmit={submit} className="grid min-w-0 gap-4 sm:grid-cols-2">
             <div className="min-w-0 space-y-1.5">
               <Label>Provider</Label>
-              <Select
-                value={providerId}
-                onChange={(e) => {
-                  setProviderId(e.target.value as LlmProvider)
-                  const p = config.providers.find((x) => x.id === e.target.value)
-                  setModel(p?.models[0] || '__custom__')
-                  setCustomModel('')
-                  setLoadedModels(null)
-                  setModelSource('')
-                }}
-              >
-                {config.providers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </Select>
+              {isEdit ? (
+                <p className="flex h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm dark:border-slate-700 dark:bg-slate-900">
+                  {info?.label ?? providerId}
+                </p>
+              ) : (
+                <Select
+                  value={providerId}
+                  onChange={(e) => {
+                    setProviderId(e.target.value as LlmProvider)
+                    const p = config.providers.find((x) => x.id === e.target.value)
+                    setModel(p?.models[0] || '__custom__')
+                    setCustomModel('')
+                    setLoadedModels(null)
+                    setModelSource('')
+                  }}
+                >
+                  {config.providers.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </Select>
+              )}
             </div>
             <div className="min-w-0 space-y-1.5">
               <Label>Label</Label>
@@ -128,13 +171,13 @@ function AddLlmForm({
               />
             </div>
             <div className="min-w-0 space-y-1.5">
-              <Label>API Key</Label>
+              <Label>API Key {isEdit && <span className="text-slate-400">(unchanged if blank)</span>}</Label>
               <Input
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder={info?.key_hint || 'api key'}
-                required
+                placeholder={isEdit ? '••••••••' : info?.key_hint || 'api key'}
+                required={!isEdit}
               />
               {info?.docs && (
                 <a
@@ -154,31 +197,27 @@ function AddLlmForm({
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={loadingModels || !apiKey}
-                  onClick={async () => {
-                    setLoadingModels(true)
-                    try {
-                      const res = await api.post<ModelsResponse>('/api/llm/models', {
-                        provider: providerId,
-                        api_key: apiKey,
-                        base_url: baseUrl,
-                      })
-                      setLoadedModels(res.models)
-                      setModelSource(res.source)
-                      if (res.models.length && model !== '__custom__') setModel(res.models[0])
-                    } catch {
-                      setModelSource('load failed')
-                    } finally {
-                      setLoadingModels(false)
-                    }
-                  }}
+                  disabled={loadingModels || (!apiKey && !isEdit)}
+                  onClick={loadModels}
                 >
                   {loadingModels ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                   Load models
                 </Button>
               </div>
-              <Select value={model} onChange={(e) => setModel(e.target.value)}>
-                {(loadedModels ?? info?.models ?? []).map((m) => (
+              <Select
+                value={model === '__custom__' || (model && !modelOptions.includes(model)) ? '__custom__' : model}
+                onChange={(e) => {
+                  if (e.target.value === '__custom__') {
+                    setModel('__custom__')
+                    if (model && model !== '__custom__') setCustomModel(model)
+                  } else {
+                    setModel(e.target.value)
+                    setCustomModel('')
+                  }
+                }}
+              >
+                {!model && <option value="" disabled>select…</option>}
+                {modelOptions.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
@@ -230,16 +269,17 @@ function AddLlmForm({
 function LlmCard({
   conn,
   onChanged,
+  onEdit,
   autoTest = false,
 }: {
   conn: LlmConnection
   onChanged: () => void
+  onEdit: () => void
   autoTest?: boolean
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [test, setTest] = useState<TestResult | null>(null)
   const [error, setError] = useState('')
-  const [modelDraft, setModelDraft] = useState(conn.model)
   const badge = BADGES[conn.provider] || BADGES.custom
 
   async function run<T>(name: string, fn: () => Promise<T>): Promise<T | null> {
@@ -259,13 +299,6 @@ function LlmCard({
     const res = await run('test', () => api.post<TestResult>(`/api/llm/${conn.id}/test`))
     if (res) setTest(res)
     onChanged()
-  }
-
-  async function saveModel() {
-    if (modelDraft.trim() === conn.model) return
-    await run('patch', () => api.patch(`/api/llm/${conn.id}`, { model: modelDraft.trim() }))
-    onChanged()
-    void onTest()
   }
 
   async function onDelete() {
@@ -311,12 +344,9 @@ function LlmCard({
             )}
             <div className="flex flex-wrap items-center gap-2">
               <span>Model:</span>
-              <Input
-                value={modelDraft}
-                onChange={(e) => setModelDraft(e.target.value)}
-                onBlur={saveModel}
-                className="h-8 max-w-full flex-1 font-mono text-xs"
-              />
+              <span className="min-w-0 break-all font-mono text-xs font-medium text-slate-700 dark:text-slate-200">
+                {conn.model || '—'}
+              </span>
             </div>
           </div>
 
@@ -344,6 +374,10 @@ function LlmCard({
               {busy === 'test' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Test
             </Button>
+            <Button size="sm" variant="outline" onClick={onEdit} disabled={busy !== null}>
+              <Pencil className="h-3.5 w-3.5" />
+              Edit
+            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -367,6 +401,7 @@ export default function LlmPage() {
   const [list, setList] = useState<LlmConnection[]>([])
   const [loading, setLoading] = useState(true)
   const [adding, setAdding] = useState(false)
+  const [editing, setEditing] = useState<LlmConnection | null>(null)
   const [error, setError] = useState('')
   const [autoTestId, setAutoTestId] = useState<string | null>(null)
 
@@ -389,11 +424,6 @@ export default function LlmPage() {
   useEffect(() => {
     void refresh()
   }, [refresh])
-
-  function handleCreated(id: string) {
-    setAutoTestId(id)
-    void refresh()
-  }
 
   return (
     <div className="min-h-dvh bg-slate-50 dark:bg-slate-950">
@@ -418,7 +448,7 @@ export default function LlmPage() {
               insights and assistants.
             </p>
           </div>
-          <Button onClick={() => setAdding((v) => !v)}>
+          <Button onClick={() => { setAdding((v) => !v); setEditing(null) }}>
             <Plus className="h-4 w-4" />
             Add LLM
           </Button>
@@ -430,8 +460,19 @@ export default function LlmPage() {
           </p>
         )}
 
-        {config && adding && (
-          <AddLlmForm config={config} onCreated={handleCreated} onClose={() => setAdding(false)} />
+        {config && (adding || editing) && (
+          <LlmForm
+            config={config}
+            initial={editing}
+            onSaved={(id) => {
+              setAutoTestId(id)
+              void refresh()
+            }}
+            onClose={() => {
+              setAdding(false)
+              setEditing(null)
+            }}
+          />
         )}
 
         {loading ? (
@@ -454,6 +495,10 @@ export default function LlmPage() {
                 key={c.id}
                 conn={c}
                 onChanged={refresh}
+                onEdit={() => {
+                  setEditing(c)
+                  setAdding(false)
+                }}
                 autoTest={c.id === autoTestId}
               />
             ))}
