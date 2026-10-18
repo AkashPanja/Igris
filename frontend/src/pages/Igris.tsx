@@ -774,6 +774,7 @@ function SettingsView() {
   const [models, setModels] = useState<string[]>([])
   const [modelSource, setModelSource] = useState('')
   const [loadingModels, setLoadingModels] = useState(false)
+  const [useCustom, setUseCustom] = useState(false)
   const [customModel, setCustomModel] = useState('')
 
   const refresh = useCallback(async () => {
@@ -782,8 +783,6 @@ function SettingsView() {
       api.get<JobRow[]>('/api/agent/jobs'),
     ])
     setSettings(s); setJobs(j)
-    setCustomModel(s.model && !models.includes(s.model) && models.length > 0 ? s.model : '')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const loadModels = useCallback(async (connId: string) => {
@@ -798,18 +797,28 @@ function SettingsView() {
     } finally { setLoadingModels(false) }
   }, [])
 
-  useEffect(() => { void refresh().then(() => { if (settings?.llm_connection_id) void loadModels(settings.llm_connection_id) }) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void refresh() }, [refresh])
+
+  // effective connection: explicit choice, or first connection (matches "Auto" chat behaviour)
+  const effectiveConn =
+    settings?.llm_connection_id || settings?.llm_options[0]?.id || ''
+
+  useEffect(() => {
+    if (settings) void loadModels(effectiveConn)
+  }, [effectiveConn, loadModels, settings])
 
   async function saveModel(value: string) {
     setMsg('')
     try {
       await api.patch('/api/agent/settings', { model: value })
+      setUseCustom(false)
       await refresh()
       setMsg(`model → ${value || '(connection default)'}`)
     } catch (e) { setMsg(e instanceof Error ? e.message : 'failed') }
   }
 
   const currentModel = settings?.model || settings?.llm_options.find((o) => o.id === settings?.llm_connection_id)?.model || ''
+  const modelOptions = Array.from(new Set([...models, ...(currentModel ? [currentModel] : [])]))
 
   async function addJob(e: React.FormEvent) {
     e.preventDefault()
@@ -839,6 +848,7 @@ function SettingsView() {
               value={settings?.llm_connection_id || ''}
               onChange={async (e) => {
                 await api.patch('/api/agent/settings', { llm_connection_id: e.target.value, model: '' })
+                setUseCustom(false)
                 setCustomModel('')
                 await refresh()
                 await loadModels(e.target.value)
@@ -853,23 +863,27 @@ function SettingsView() {
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <Label>Model {currentModel && <span className="text-slate-400">· now: {settings?.model || 'default'}</span>}</Label>
-              <Button size="sm" variant="outline" onClick={() => settings?.llm_connection_id && loadModels(settings.llm_connection_id)} disabled={loadingModels || !settings?.llm_connection_id}>
+              <Button size="sm" variant="outline" onClick={() => loadModels(effectiveConn)} disabled={loadingModels || !effectiveConn}>
                 {loadingModels ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
                 Load models
               </Button>
             </div>
             <Select
-              value={customModel ? '__custom__' : currentModel || ''}
+              value={useCustom ? '__custom__' : currentModel || ''}
               onChange={(e) => {
-                if (e.target.value === '__custom__') { setCustomModel(currentModel); return }
+                if (e.target.value === '__custom__') {
+                  setUseCustom(true)
+                  setCustomModel(currentModel || '')
+                  return
+                }
                 void saveModel(e.target.value)
               }}
             >
-              <option value="" disabled>{currentModel ? currentModel : 'select a model…'}</option>
-              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+              {!currentModel && !useCustom && <option value="" disabled>select a model…</option>}
+              {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
               <option value="__custom__">Custom model id…</option>
             </Select>
-            {customModel && (
+            {useCustom && (
               <div className="flex gap-2">
                 <Input value={customModel} onChange={(e) => setCustomModel(e.target.value)} placeholder="model id" />
                 <Button size="sm" onClick={() => saveModel(customModel)} disabled={!customModel.trim()}>Save</Button>
