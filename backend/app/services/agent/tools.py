@@ -302,6 +302,14 @@ async def h_get_quote(session: AsyncSession, user: User, args: dict) -> dict:
     return {"symbol": symbol, "ltp": px, "via": via}
 
 
+async def h_get_option_chain(session: AsyncSession, user: User, args: dict) -> dict:
+    symbol = (args.get("symbol") or "").strip().upper()
+    if not symbol:
+        return {"error": "symbol is required"}
+    expiry = (args.get("expiry") or "").strip()
+    return await trading.get_option_chain(session, user.id, symbol, expiry)
+
+
 async def h_propose_trade(session: AsyncSession, user: User, args: dict) -> dict:
     rule = await trading.get_rules(session, user.id)
     symbol = (args.get("symbol") or "").strip().upper()
@@ -500,9 +508,13 @@ _reg(ToolSpec("add_signal", "Record a candidate signal (symbol, direction, catal
     "catalyst": {"type": "string"},
     "score": {"type": "number"},
 }, ["symbol"]), h_add_signal))
-_reg(ToolSpec("get_quote", "Live LTP quote via the connected broker (Fyers/Groww).", _obj({
+_reg(ToolSpec("get_quote", "Live LTP quote via the connected broker (Fyers/Groww); falls back to free NSE for indices.", _obj({
     "symbol": {"type": "string"},
 }, ["symbol"]), h_get_quote))
+_reg(ToolSpec("get_option_chain", "Option chain for an index/underlying (e.g. NIFTY, BANKNIFTY, RELIANCE). Groww needs the ₹499 Trading API subscription; Fyers needs a valid token.", _obj({
+    "symbol": {"type": "string"},
+    "expiry": {"type": "string", "description": "YYYY-MM-DD; empty = nearest/current expiry"},
+}, ["symbol"]), h_get_option_chain))
 _reg(ToolSpec("research_symbol", "Aggregate everything known about a symbol: quote, watchlist, signals, research notes.", _obj({
     "symbol": {"type": "string"},
 }, ["symbol"]), h_research_symbol))

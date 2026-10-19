@@ -16,6 +16,7 @@ TOOLS: dict[str, list[str]] = {
     "fyers": [
         "get_profile",
         "get_quotes",
+        "get_option_chain",
         "get_positions",
         "get_holdings",
         "get_orderbook",
@@ -26,8 +27,9 @@ TOOLS: dict[str, list[str]] = {
     ],
     "groww": [
         "get_profile",
-        "get_quotes",
         "get_ltp",
+        "get_quotes",
+        "get_option_chain",
         "get_holdings",
         "get_positions",
         "get_orderbook",

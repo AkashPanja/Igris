@@ -54,7 +54,12 @@ SYSTEM_TEMPLATE = """You are Igris, the user's personal trading agent for Indian
 - Scheduled jobs (schedule_job) run tools on an interval; confirmations happen on the website.
 
 ## Instruments
-equity_intraday, equity_delivery, futures, options. For F&O pass qty (units) and expiry (YYYY-MM-DD); long = BUY, short = SELL. The user is notified whenever a LONG trade is opened.
+equity_intraday, equity_delivery, futures, options. For F&O pass qty (units) and expiry (YYYY-MM-DD); long = BUY, short = SELL. Encode the option type in strike (e.g. strike="24000CE" or "24000PE"). The user is notified whenever a LONG trade is opened.
+
+## Data sources (be honest about limits)
+- Quotes and option-chains come from the connected broker. Fyers needs a valid daily OAuth token (expires ~06:30 AM IST); Groww auth works but its market-data and option-chain endpoints require the separate ₹499/mo Groww Trading API subscription.
+- Indices (NIFTY, BANKNIFTY, SENSEX, INDIA VIX, GIFT NIFTY…) fall back to a free NSE feed that works from this server. Equity quotes need a working broker token + subscription.
+- If get_quote / get_option_chain returns an error, say plainly which source failed and why (token expired vs subscription missing) — don't invent a price.
 """
 
 

@@ -51,6 +51,18 @@ async def test_connection(access_token: str) -> tuple[bool, str]:
         # SDK raises GrowwAPIException on FAILURE; payload returned on success
         groww.get_user_profile()
         ms = int((time.monotonic() - start) * 1000)
-        return True, f"OK · {ms}ms"
+        # Probe a CASH quote: profile auth works even without the ₹499/mo
+        # Trading API subscription, but market-data/option-chain calls need it.
+        try:
+            groww.get_quote(trading_symbol="RELIANCE", exchange="NSE", segment="CASH")
+            return True, f"OK · {ms}ms"
+        except Exception as data_exc:  # noqa: BLE001
+            msg = str(data_exc)
+            if "forbidden" in msg.lower() or "subscription" in msg.lower():
+                return True, (
+                    f"OK (auth) · {ms}ms · market data blocked — "
+                    "Groww Trading API subscription required for quotes/option-chain"
+                )
+            return True, f"OK (auth) · {ms}ms · data probe: {msg[:120]}"
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)

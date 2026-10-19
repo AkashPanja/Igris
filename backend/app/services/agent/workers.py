@@ -150,7 +150,10 @@ async def _nse_index_snapshot() -> tuple[dict[str, tuple[float, float]], str]:
 
 
 def _fyers_symbol(sym: str) -> str:
-    return f"NSE:{sym}-EQ"
+    # Delegate to trading's format mapper so indices (NIFTY→NSE:NIFTY50-INDEX) work too
+    from app.services.agent import trading as _t
+
+    return _t.fyers_spot_symbol(sym)
 
 
 def _parse_fyers_ticker(raw: str | None, fallback: str) -> str:
@@ -199,8 +202,11 @@ async def fetch_quotes(
         client, _ = trading._broker_client(session, user_id, "groww")
         if client is not None:
             for sym in missing:
+                if trading.is_index_symbol(sym):
+                    continue  # indices are not on Groww's CASH segment — skip
                 try:
-                    resp = client.get_quote(trading_symbol=sym, exchange="NSE")
+                    # Docs: get_quote(trading_symbol, exchange, segment) — segment is required
+                    resp = client.get_quote(trading_symbol=sym, exchange="NSE", segment="CASH")
                     p = resp.get("payload") or resp.get("data") or {}
                     ltp = p.get("ltp")
                     if ltp:
@@ -209,6 +215,13 @@ async def fetch_quotes(
                         out[sym] = (float(ltp), float(prev) if prev else None)
                 except Exception as exc:  # noqa: BLE001
                     log.debug("groww quote %s failed: %s", sym, exc)
+            # free NSE for any index symbols that were skipped
+            for sym in missing:
+                if sym in out or not trading.is_index_symbol(sym):
+                    continue
+                px = trading.nse_index_ltp(sym)
+                if px is not None:
+                    out[sym] = (px, None)
     return out
 
 

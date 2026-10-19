@@ -441,3 +441,154 @@ class TestS5Workers:
         assert roster["usage_today"]["completion_tokens"] == 30
         chat_card = next(a for a in roster["agents"] if a["name"] == "chat")
         assert chat_card["status"] == "ok" and chat_card["last_run_at"]
+
+
+class TestBrokerFormats:
+    """S5: every broker call shape validated against official SDK docs."""
+
+    async def test_tc083_symbol_normalization_and_contract_formats(self):
+        import app.services.agent.trading as tr
+
+        # spot symbols
+        assert tr.fyers_spot_symbol("TNPO") == "NSE:TNPO-EQ"
+        assert tr.fyers_spot_symbol("NSE:TNPO-EQ") == "NSE:TNPO-EQ"
+        assert tr.fyers_spot_symbol("NIFTY") == "NSE:NIFTY50-INDEX"
+        assert tr.fyers_spot_symbol("NIFTY 50") == "NSE:NIFTY50-INDEX"
+        assert tr.is_index_symbol("NIFTY") and not tr.is_index_symbol("TNPO")
+
+        # monthly expiry (2026-10-29 is the last Thursday of Oct 2026)
+        assert tr.fyers_contract_symbol("NIFTY", "options", "2026-10-29", "24000CE") == "NSE:NIFTY26OCT24000CE"
+        # weekly expiry (2026-10-08 is a Thursday but not the last)
+        assert tr.fyers_contract_symbol("NIFTY", "options", "2026-10-08", "24000CE") == "NSE:NIFTY26100824000CE"
+        assert tr.fyers_contract_symbol("NIFTY", "futures", "2026-10-29") == "NSE:NIFTY26OCTFUT"
+        # Groww monthly-style
+        assert tr.groww_contract_symbol("NIFTY", "options", "2026-10-29", "24000PE") == "NIFTY26OCT24000PE"
+        assert tr.groww_contract_symbol("RELIANCE", "equity_delivery", "") == "RELIANCE"
+        # product per Groww docs: F&O → NRML, intraday equity → MIS, else CNC
+        assert tr.groww_product("options") == "NRML"
+        assert tr.groww_product("futures") == "NRML"
+        assert tr.groww_product("equity_intraday") == "MIS"
+        assert tr.groww_product("equity_delivery") == "CNC"
+
+    async def test_tc084_get_quote_calls_groww_with_segment_and_nse_fallback(self, client, monkeypatch):
+        import app.services.agent.trading as tr
+        from sqlalchemy import select
+
+        from app.models import Connection, User
+
+        calls: list[dict] = []
+
+        class FakeGroww:
+            def get_quote(self, **kw):
+                calls.append(kw)
+                return {"payload": {"ltp": 3000.5}}
+
+        await _complete_setup(client)
+        async with SessionLocal() as session:
+            user = (await session.execute(select(User))).scalars().first()
+            session.add(Connection(
+                id="conn-s5-groww", user_id=user.id, provider="groww", app_id="k",
+                credentials="{}", status="connected",
+            ))
+            await session.commit()
+
+            async def fake_broker(sess, uid, provider):
+                return (FakeGroww(), None) if provider == "groww" else (None, "no fyers")
+
+            monkeypatch.setattr(tr, "_broker_client", fake_broker)
+
+            px, via = await tr.get_quote(session, user.id, "TNPO")
+            assert px == 3000.5 and via == "groww"
+            # the exact bug we fixed: get_quote previously called a nonexistent
+            # get_ltp_data and omitted segment; now it must pass segment="CASH"
+            assert calls and calls[0] == {"trading_symbol": "TNPO", "exchange": "NSE", "segment": "CASH"}
+
+            # index goes to the free NSE fallback (Groww CASH has no indices)
+            monkeypatch.setattr(tr, "nse_index_ltp", lambda s: 22900.0 if s == "NIFTY" else None)
+            px, via = await tr.get_quote(session, user.id, "NIFTY")
+            assert px == 22900.0 and via == "nse"
+
+    async def test_tc085_option_chain_extractor_and_tool(self, client, monkeypatch):
+        import app.services.agent.trading as tr
+        from app.models import User
+        from sqlalchemy import select
+
+        # extractor: Groww-style nested CE/PE
+        groww_payload = {"status": "SUCCESS", "payload": {"data": {"oi_data": [
+            {"strike_price": 24000, "CE": {"last_price": 120.5, "oi": 1000},
+             "PE": {"last_price": 95.2, "oi": 2000}},
+        ]}}}
+        rows = tr._extract_chain_strikes(groww_payload)
+        assert rows and rows[0]["strike"] == 24000
+        assert rows[0]["CE"]["ltp"] == 120.5 and rows[0]["PE"]["oi"] == 2000
+
+        # extractor: Fyers-style flat option_type rows
+        fyers_payload = {"s": "ok", "data": {"optionsData": {"records": {"optionsData": [
+            {"strikePrice": 24100, "optionType": "PE", "lastPrice": 88, "openInterest": 700},
+        ]}}}}
+        rows = tr._extract_chain_strikes(fyers_payload)
+        assert rows and rows[0]["strike"] == 24100 and rows[0]["option_type"] == "PE"
+
+        # get_option_chain via a fake groww client
+        class FakeChain:
+            def get_option_chain(self, **kw):
+                assert kw["exchange"] == "NSE" and kw["underlying"] == "NIFTY"
+                return groww_payload
+
+        from app.models import Connection
+
+        await _complete_setup(client)
+        async with SessionLocal() as session:
+            user = (await session.execute(select(User))).scalars().first()
+            session.add(Connection(
+                id="conn-s5-chain", user_id=user.id, provider="groww", app_id="k",
+                credentials="{}", status="connected",
+            ))
+            await session.commit()
+
+            async def fake_broker(sess, uid, provider):
+                return (FakeChain(), None) if provider == "groww" else (None, "no fyers")
+
+            monkeypatch.setattr(tr, "_broker_client", fake_broker)
+            out = await tr.get_option_chain(session, user.id, "NIFTY")
+            assert out["via"] == "groww" and out["strikes"][0]["strike"] == 24000
+
+    async def test_tc086_place_order_uses_groww_order_id_and_nrml(self, client, monkeypatch):
+        import app.services.agent.trading as tr
+        from app.models import Connection, Rule, Trade, User
+        from sqlalchemy import select
+
+        seen: dict = {}
+
+        class FakeGroww:
+            def place_order(self, **kw):
+                seen.update(kw)
+                # docs response: payload.groww_order_id (NOT order_number)
+                return {"status": "SUCCESS", "payload": {"groww_order_id": "GMK123", "order_status": "OPEN"}}
+
+        await _complete_setup(client)
+        async with SessionLocal() as session:
+            user = (await session.execute(select(User))).scalars().first()
+            session.add(Connection(
+                id="conn-s5-order", user_id=user.id, provider="groww", app_id="k",
+                credentials="{}", status="connected",
+            ))
+            await session.commit()
+            rule = await tr.get_rules(session, user.id)
+
+            trade = Trade(
+                id="tc086trade", user_id=user.id, symbol="NIFTY", side="BUY",
+                instrument="options", expiry="2026-10-29", strike="24000CE",
+                qty=50, entry_px=100.0, status="pending_approval", mode="live",
+            )
+
+            async def fake_broker(sess, uid, provider):
+                return (FakeGroww(), None) if provider == "groww" else (None, "no fyers")
+
+            monkeypatch.setattr(tr, "_broker_client", fake_broker)
+            ok, ref = await tr.place_broker_order(session, user.id, trade, rule)
+            assert ok and ref == "GMK123"  # read from groww_order_id
+            assert seen["segment"] == "FNO"
+            assert seen["product"] == "NRML"  # F&O must be NRML, not CNC
+            assert seen["trading_symbol"] == "NIFTY26OCT24000CE"  # contract symbol, not bare NIFTY
+            assert seen["exchange"] == "NSE" and seen["order_type"] == "MARKET"

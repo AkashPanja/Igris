@@ -258,31 +258,322 @@ async def _broker_client(session: AsyncSession, user_id: int, provider: str):
     return None, f"Unknown broker {provider}"
 
 
+# ------------------------------------------------------- broker symbol formats
+# Verified against official docs 2026-10-19:
+#   Fyers: equity "NSE:RELIANCE-EQ"; index "NSE:NIFTY50-INDEX";
+#          options monthly "NSE:NIFTY26OCT24000CE", weekly "NSE:NIFTY26102424000CE"
+#          (yy + 3-letter-mon monthly; yy+single-digit-month+dd weekly); futures "NSE:NIFTY26OCTFUT"
+#   Groww: trading_symbol for F&O monthly-style "NIFTY25OCT24000CE" / futures "NIFTY25OCTFUT";
+#          equity plain "RELIANCE"; segment CASH|FNO, product CNC|MIS|NRML
+
+_MON3 = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+# Common NSE index aliases → canonical Fyers base name (without -INDEX)
+_INDEX_ALIASES = {
+    "NIFTY": "NIFTY50", "NIFTY50": "NIFTY50", "NIFTY 50": "NIFTY50", "NIFTY-50": "NIFTY50",
+    "BANKNIFTY": "BANKNIFTY", "NIFTY BANK": "BANKNIFTY", "NIFTYBANK": "BANKNIFTY",
+    "FINNIFTY": "FINNIFTY", "NIFTY FINANCIAL SERVICES": "FINNIFTY", "NIFTY FIN SERVICE": "FINNIFTY",
+    "MIDCPNIFTY": "MIDCPNIFTY", "NIFTY MIDCAP SELECT": "MIDCPNIFTY",
+    "NIFTY IT": "NIFTYIT", "NIFTYIT": "NIFTYIT",
+    "INDIA VIX": "INDIAVIX", "INDIAVIX": "INDIAVIX", "VIX": "INDIAVIX",
+    "SENSEX": "SENSEX", "BANKEX": "BANKEX",
+    "GIFT NIFTY": "GIFTNIFTY", "GIFTNIFTY": "GIFTNIFTY", "NIFTY SGX": "GIFTNIFTY",
+}
+
+
+def is_index_symbol(sym: str) -> bool:
+    return (sym or "").strip().upper() in _INDEX_ALIASES
+
+
+def fyers_spot_symbol(sym: str) -> str:
+    """Map a bare ticker/index to Fyers spot symbol format."""
+    key = (sym or "").strip().upper()
+    if ":" in key:
+        return key
+    idx = _INDEX_ALIASES.get(key)
+    if idx:
+        return f"NSE:{idx}-INDEX"
+    return f"NSE:{key}-EQ"
+
+
+def nse_index_ltp(sym: str) -> float | None:
+    """Free NSE index LTP (works from this server IP). Returns None on miss/fail."""
+    key = (sym or "").strip().upper()
+    canon = _INDEX_ALIASES.get(key)
+    if not canon:
+        return None
+    try:
+        from nsepython import nsefetch
+
+        data = nsefetch("https://www.nseindia.com/api/allIndices")
+        rows = (data or {}).get("data") or []
+        # canonical → the NSE "index" display name(s)
+        want = {
+            "NIFTY50": "NIFTY 50", "BANKNIFTY": "NIFTY BANK", "FINNIFTY": "NIFTY FINANCIAL SERVICES",
+            "MIDCPNIFTY": "NIFTY MIDCAP SELECT", "NIFTYIT": "NIFTY IT", "INDIAVIX": "INDIA VIX",
+            "SENSEX": "SENSEX", "BANKEX": "BANKEX",
+        }.get(canon, canon)
+        for r in rows:
+            if (r.get("index") or "").upper() == want.upper():
+                ltp = r.get("last")
+                if ltp:
+                    return float(ltp)
+        # GIFT NIFTY isn't in allIndices — it's under marketStatus.giftnifty (LASTPRICE key)
+        if canon == "GIFTNIFTY":
+            ms = nsefetch("https://www.nseindia.com/api/marketStatus")
+            g = (ms or {}).get("giftnifty") or {}
+            ltp = g.get("LASTPRICE") or g.get("last") or g.get("latest")
+            if ltp:
+                return float(ltp)
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def _parse_expiry(expiry: str) -> datetime | None:
+    try:
+        return datetime.strptime((expiry or "").strip()[:10], "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _is_monthly_expiry(d: datetime) -> bool:
+    """True when d is the month's last Tuesday or Thursday (NSE monthly expiry days)."""
+    import calendar
+
+    last_day = calendar.monthrange(d.year, d.month)[1]
+    for dow in (1, 3):  # Tue=1, Thu=3
+        dd = last_day
+        while datetime(d.year, d.month, dd).weekday() != dow:
+            dd -= 1
+        if dd == d.day:
+            return True
+    return False
+
+
+def _split_strike_ot(raw_strike: str) -> tuple[str, str]:
+    """'24000CE' → ('24000','CE'); '24000' → ('24000','')."""
+    s = (raw_strike or "").strip().upper()
+    if s.endswith(("CE", "PE")):
+        return s[:-2], s[-2:]
+    return s, ""
+
+
+def fyers_contract_symbol(underlying: str, instrument: str, expiry: str, raw_strike: str = "") -> str:
+    """Build a Fyers F&O symbol; falls back to equity spot when expiry unparseable."""
+    d = _parse_expiry(expiry)
+    if d is None:
+        return fyers_spot_symbol(underlying)
+    yy = f"{d.year % 100:02d}"
+    mon = _MON3[d.month - 1]
+    if instrument == "futures":
+        return f"NSE:{underlying}{yy}{mon}FUT"
+    strike, ot = _split_strike_ot(raw_strike)
+    if not strike or not ot:
+        return fyers_spot_symbol(underlying)  # can't build a contract without strike+CE/PE
+    token = f"{yy}{mon}" if _is_monthly_expiry(d) else f"{yy}{d.month}{d.day:02d}"
+    return f"NSE:{underlying}{token}{strike}{ot}"
+
+
+def groww_contract_symbol(underlying: str, instrument: str, expiry: str, raw_strike: str = "") -> str:
+    """Build a Groww F&O trading_symbol (monthly-style) or return the equity ticker."""
+    if instrument.startswith("equity"):
+        return underlying
+    d = _parse_expiry(expiry)
+    if d is None:
+        return underlying
+    yy = f"{d.year % 100:02d}"
+    mon = _MON3[d.month - 1]
+    if instrument == "futures":
+        return f"{underlying}{yy}{mon}FUT"
+    strike, ot = _split_strike_ot(raw_strike)
+    if not strike or not ot:
+        return underlying
+    return f"{underlying}{yy}{mon}{strike}{ot}"
+
+
+def groww_product(instrument: str) -> str:
+    """Groww product per docs: F&O=NRML, equity_intraday=MIS, else CNC."""
+    if instrument in ("futures", "options"):
+        return "NRML"
+    if instrument == "equity_intraday":
+        return "MIS"
+    return "CNC"
+
+
 async def get_quote(session: AsyncSession, user_id: int, symbol: str) -> tuple[float | None, str]:
-    """Best-effort quote via Fyers then Groww. Fail-closed: (None, reason)."""
+    """Best-effort quote: Fyers → Groww → free NSE (indices only).
+
+    Accepts "TNPO", "NSE:TNPO-EQ", "NIFTY"/"NIFTY 50", "GIFT NIFTY" etc.
+    Fail-closed: (None, reason-chain).
+    """
+    sym = (symbol or "").strip().upper()
+    reasons: list[str] = []
+
+    # ---- Fyers (docs: symbols like "NSE:RELIANCE-EQ" / "NSE:NIFTY50-INDEX")
+    fyers_sym = fyers_spot_symbol(sym)
     client, err = await _broker_client(session, user_id, "fyers")
     if client is not None:
         try:
-            resp = client.quotes({"symbols": symbol})
+            resp = client.quotes({"symbols": fyers_sym})
             if isinstance(resp, dict) and resp.get("s") == "ok":
                 d = (resp.get("d") or [{}])[0]
                 v = d.get("v") or {}
                 ltp = v.get("lp") or v.get("ltp")
                 if ltp:
                     return float(ltp), "fyers"
-        except Exception:  # noqa: BLE001
-            pass
+                reasons.append("fyers: empty LTP")
+            else:
+                reasons.append(f"fyers: {(resp or {}).get('message', 'error') if isinstance(resp, dict) else 'error'}")
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"fyers: {exc}")
+    else:
+        reasons.append(err or "fyers unavailable")
+
+    # ---- Groww (docs: get_quote(trading_symbol, exchange, segment); CASH only —
+    #      indices are not served on the CASH segment)
+    if not is_index_symbol(sym):
+        client, err = await _broker_client(session, user_id, "groww")
+        if client is not None:
+            try:
+                resp = client.get_quote(trading_symbol=sym, exchange="NSE", segment="CASH")
+                p = resp.get("payload") or resp.get("data") or {}
+                ltp = p.get("ltp")
+                if ltp:
+                    return float(ltp), "groww"
+                reasons.append("groww: empty LTP")
+            except Exception as exc:  # noqa: BLE001
+                reasons.append(f"groww: {exc}")
+        else:
+            reasons.append(err or "groww unavailable")
+    else:
+        reasons.append("groww: indices not on CASH segment (using NSE)")
+
+    # ---- Free NSE (works from this server: allIndices + marketStatus)
+    px = nse_index_ltp(sym)
+    if px is not None:
+        return px, "nse"
+    reasons.append("nse: not a known index (equity feed needs a working broker token)")
+
+    return None, " · ".join(reasons) or "no quote source"
+
+
+def _extract_chain_strikes(resp: Any) -> list[dict] | None:
+    """Shape-agnostic pull of strike rows out of an option-chain payload.
+
+    Looks for a list of dicts that carry a strike key and CE/PE (or option_type).
+    Returns None when nothing recognizable is found (caller falls back to raw).
+    """
+
+    def _row(r: dict) -> dict | None:
+        strike = r.get("strike") or r.get("strike_price") or r.get("strikePrice") or r.get("strikeprice")
+        if strike is None:
+            return None
+        ce = r.get("CE") or r.get("ce") or r.get("call") or r.get("CALL")
+        pe = r.get("PE") or r.get("pe") or r.get("put") or r.get("PUT")
+        if isinstance(ce, dict) and isinstance(pe, dict):
+            return {
+                "strike": strike,
+                "CE": {"ltp": ce.get("ltp") or ce.get("last_price") or ce.get("lastPrice"),
+                       "oi": ce.get("oi") or ce.get("open_interest") or ce.get("openInterest")},
+                "PE": {"ltp": pe.get("ltp") or pe.get("last_price") or pe.get("lastPrice"),
+                       "oi": pe.get("oi") or pe.get("open_interest") or pe.get("openInterest")},
+            }
+        ot = (r.get("option_type") or r.get("optionType") or r.get("type") or "").upper()
+        if ot in ("CE", "PE", "CALL", "PUT"):
+            return {
+                "strike": strike,
+                "option_type": "CE" if ot in ("CE", "CALL") else "PE",
+                "ltp": r.get("ltp") or r.get("last_price") or r.get("lastPrice"),
+                "oi": r.get("oi") or r.get("open_interest") or r.get("openInterest"),
+            }
+        return None
+
+    def _walk(node: Any, depth: int = 0) -> list[dict] | None:
+        if depth > 5:
+            return None
+        if isinstance(node, list):
+            rows = [_row(r) for r in node if isinstance(r, dict)]
+            good = [r for r in rows if r is not None]
+            if good:
+                return good
+            return None
+        if isinstance(node, dict):
+            for key in ("options", "data", "payload", "chain", "records", "filtered", "_expiryData"):
+                if key in node:
+                    found = _walk(node[key], depth + 1)
+                    if found:
+                        return found
+            for v in node.values():
+                if isinstance(v, (dict, list)):
+                    found = _walk(v, depth + 1)
+                    if found:
+                        return found
+        return None
+
+    return _walk(resp)
+
+
+async def get_option_chain(
+    session: AsyncSession, user_id: int, symbol: str, expiry: str = ""
+) -> dict[str, Any]:
+    """Option chain via Groww then Fyers. Returns compact strikes or a raw fallback.
+
+    Groww needs the ₹499 Trading API subscription; Fyers needs a valid token.
+    When neither yields a parseable chain, returns the truncated raw payload
+    so the LLM can still read it — plus the honest per-source error chain.
+    """
+    sym = (symbol or "").strip().upper()
+    reasons: list[str] = []
+
+    # ---- Groww: get_option_chain(exchange, underlying, expiry_date "YYYY-MM-DD")
     client, err = await _broker_client(session, user_id, "groww")
     if client is not None:
         try:
-            resp = client.get_ltp_data(symbols=[symbol])
-            data = resp.get("payload") or {}
-            for v in data.values():
-                if isinstance(v, dict) and v.get("ltp"):
-                    return float(v["ltp"]), "groww"
-        except Exception:  # noqa: BLE001
-            pass
-    return None, err or "no quote source"
+            resp = client.get_option_chain(exchange="NSE", underlying=sym, expiry_date=expiry or "")
+            rows = _extract_chain_strikes(resp)
+            if rows:
+                return {"via": "groww", "symbol": sym, "expiry": expiry, "strikes": rows[:21]}
+            reasons.append("groww: chain shape unrecognized")
+            raw_g = json.dumps(resp, default=str)[:1200]
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"groww: {exc}")
+            raw_g = ""
+    else:
+        reasons.append(err or "groww unavailable")
+        raw_g = ""
+
+    # ---- Fyers: optionchain({"symbol": "NSE:NIFTY50-INDEX", "strikecount": n, ...})
+    client, err = await _broker_client(session, user_id, "fyers")
+    if client is not None:
+        try:
+            data: dict[str, Any] = {
+                "symbol": fyers_spot_symbol(sym),
+                "strikecount": 11,
+                "timestamp": "",
+                "greeks": 1,
+            }
+            resp = client.optionchain(data=data)
+            if isinstance(resp, dict) and resp.get("s") == "error":
+                reasons.append(f"fyers: {resp.get('message', 'error')}")
+            else:
+                rows = _extract_chain_strikes(resp)
+                if rows:
+                    return {"via": "fyers", "symbol": sym, "expiry": expiry, "strikes": rows[:21]}
+                reasons.append("fyers: chain shape unrecognized")
+                raw_f = json.dumps(resp, default=str)[:1200]
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"fyers: {exc}")
+            raw_f = ""
+    else:
+        reasons.append(err or "fyers unavailable")
+        raw_f = ""
+
+    return {
+        "error": " · ".join(reasons) or "no chain source",
+        "symbol": sym,
+        "raw": raw_g or raw_f or "",
+        "hint": "Groww option-chain needs the ₹499/mo Trading API subscription; Fyers needs a valid OAuth token.",
+    }
 
 
 async def place_broker_order(
@@ -292,21 +583,29 @@ async def place_broker_order(
     client, err = await _broker_client(session, user_id, "groww")
     if client is not None:
         try:
-            # groww trading_symbol like "NIFTY16OCT82500CE" / "RELIANCE"; exchange NSE, segment CASH/CURRENCY per symbol
-            segment = "CASH" if trade.instrument.startswith("equity") else ("FNO" if trade.instrument in ("futures", "options") else "CASH")
+            # Docs: segment CASH|FNO; product CNC|Mis|NRML (F&O → NRML); trading_symbol
+            # "NIFTY25OCT24000CE" (F&O) / "RELIANCE" (equity); response payload.groww_order_id.
+            segment = "CASH" if trade.instrument.startswith("equity") else "FNO"
+            t_symbol = groww_contract_symbol(trade.symbol, trade.instrument, trade.expiry, trade.strike)
             resp = client.place_order(
                 validity="DAY",
                 exchange="NSE",
                 order_type="MARKET",
-                product="MIS" if trade.instrument == "equity_intraday" else "CNC",
+                product=groww_product(trade.instrument),
                 quantity=int(trade.qty),
                 segment=segment,
-                trading_symbol=trade.symbol,
+                trading_symbol=t_symbol,
                 transaction_type=trade.side,
                 order_reference_id=trade.id,
             )
             payload = resp.get("payload") or {}
-            order_id = str(payload.get("order_number") or payload.get("order_id") or "")
+            # Docs response schema: payload.groww_order_id (NOT order_number/order_id)
+            order_id = str(
+                payload.get("groww_order_id")
+                or payload.get("order_number")
+                or payload.get("order_id")
+                or ""
+            )
             if order_id:
                 return True, order_id
             return False, str(resp)[:300]
@@ -315,8 +614,10 @@ async def place_broker_order(
     client, err = await _broker_client(session, user_id, "fyers")
     if client is not None:
         try:
+            # Docs: symbol must be Fyers format; type 1=market; side ±1; productType
+            # CNC (delivery) / INTRADAY; validity DAY; F&O uses the contract symbol.
             data = {
-                "symbol": trade.symbol,
+                "symbol": fyers_contract_symbol(trade.symbol, trade.instrument, trade.expiry, trade.strike),
                 "qty": int(trade.qty),
                 "type": 1,  # market
                 "side": 1 if trade.side == "BUY" else -1,
