@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     login_lockout_minutes: int = 15
     port: int = 4024
     public_base_url: str = "http://igris.bnfkquodqjp.uk/"
-    default_reauth_time: str = "07:30"
+    default_reauth_time: str = "05:45"  # IST — before Groww's 06:00 IST token death
 
     model_config = SettingsConfigDict(
         env_file=".env",

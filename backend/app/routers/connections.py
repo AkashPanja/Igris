@@ -274,4 +274,10 @@ async def test_connection(
         ok, msg = await fyers_broker.test_connection(conn.app_id, token)
     else:
         ok, msg = await groww_broker.test_connection(token)
+    if not ok and conn.status == "connected":
+        # don't leave a dead token looking healthy — flip so the scheduler
+        # auto-recovers (Groww re-logins silently; Fyers emails for OAuth)
+        conn.status = "needs_auth"
+        conn.last_error = msg[:500]
+        await session.commit()
     return {"success": ok, "message": msg}

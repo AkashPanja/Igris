@@ -73,7 +73,7 @@ class Connection(Base):
     status: Mapped[str] = mapped_column(String(24), default="never_authed")
     # never_authed | connected | needs_auth | error
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    reauth_time: Mapped[str] = mapped_column(String(5), default="07:30")
+    reauth_time: Mapped[str] = mapped_column(String(5), default="05:45")  # IST
     last_error: Mapped[str] = mapped_column(Text, default="")
     last_reauth_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -416,7 +416,10 @@ class TestS5Workers:
 
         async with SessionLocal() as session:
             conn = await session.get(Connection, "conn-naive")
-            assert conn.status == "needs_auth"
+            # groww expired token goes straight to silent reauth; without a TOTP
+            # secret it fails verification and lands in "error" (no crash, no hang)
+            assert conn.status in ("needs_auth", "error")
+            assert conn.last_error
 
     async def test_tc081_chat_logs_token_usage(self, client, monkeypatch):
         await _complete_setup(client)

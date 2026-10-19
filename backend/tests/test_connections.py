@@ -223,7 +223,7 @@ class TestScheduler:
         from datetime import datetime, timedelta, timezone
 
         from app.models import Connection
-        from app.services.scheduler import _due_for_reauth
+        from app.services.scheduler import IST, _due_for_reauth
 
         def conn(reauth_time: str, last_reauth_at=None) -> Connection:
             return Connection(
@@ -235,26 +235,26 @@ class TestScheduler:
                 last_reauth_at=last_reauth_at,
             )
 
-        now_local = datetime.now().astimezone()
+        now_ist = datetime.now(timezone.utc).astimezone(IST)
         yesterday = datetime.now(timezone.utc) - timedelta(days=1)
 
         # scheduled time already passed today, last run yesterday -> due
-        past = (now_local - timedelta(hours=1)).strftime("%H:%M")
+        past = (now_ist - timedelta(hours=1)).strftime("%H:%M")
         assert _due_for_reauth(conn(past, last_reauth_at=yesterday)) is True
         # already ran today -> not due
         assert _due_for_reauth(conn(past, last_reauth_at=datetime.now(timezone.utc))) is False
         # scheduled later today -> not due
-        future = (now_local + timedelta(hours=2)).strftime("%H:%M")
+        future = (now_ist + timedelta(hours=2)).strftime("%H:%M")
         assert _due_for_reauth(conn(future, last_reauth_at=yesterday)) is False
 
     async def test_tc033b_due_never_ran_after_time(self):
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         from app.models import Connection
-        from app.services.scheduler import _due_for_reauth
+        from app.services.scheduler import IST, _due_for_reauth
 
-        now_local = datetime.now().astimezone()
-        past = (now_local - timedelta(minutes=30)).strftime("%H:%M")
+        now_ist = datetime.now(timezone.utc).astimezone(IST)
+        past = (now_ist - timedelta(minutes=30)).strftime("%H:%M")
         c = Connection(
             id="x",
             user_id=1,
@@ -264,6 +264,24 @@ class TestScheduler:
             last_reauth_at=None,
         )
         assert _due_for_reauth(c) is True
+
+    async def test_tc082_groww_token_expiry_is_0600_ist(self):
+        """Groww tokens die daily 06:00 IST — stored expiry must match reality."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.services.brokers.groww import next_token_expiry
+
+        ist = timezone(timedelta(hours=5, minutes=30))
+        # before 06:00 IST -> expiry is 06:00 IST today
+        before = datetime(2026, 10, 19, 0, 0, tzinfo=timezone.utc)  # 05:30 IST
+        exp = next_token_expiry(before)
+        assert exp > before
+        assert exp.astimezone(ist).strftime("%H:%M") == "06:00"
+        # after 06:00 IST -> expiry is 06:00 IST tomorrow
+        after = datetime(2026, 10, 19, 12, 0, tzinfo=timezone.utc)  # 17:30 IST
+        exp2 = next_token_expiry(after)
+        assert after < exp2 < after + timedelta(days=1)
+        assert exp2.astimezone(ist).strftime("%H:%M") == "06:00"
 
 
 class TestGrowwTotpQr:

@@ -2,11 +2,25 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
 
 def generate_totp(totp_secret: str) -> str:
     import pyotp
 
     return pyotp.TOTP(totp_secret.strip()).now()
+
+
+def next_token_expiry(now: datetime | None = None) -> datetime:
+    """Groww access tokens die daily at 06:00 AM IST (docs), not 24h after issue."""
+    now_utc = (now or datetime.now(timezone.utc))
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    t = now_utc.astimezone(IST)
+    target = t.replace(hour=6, minute=0, second=0, microsecond=0)
+    if target <= t:
+        target += timedelta(days=1)
+    return target.astimezone(timezone.utc)
 
 
 async def connect(api_key: str, totp_secret: str) -> dict:
@@ -17,8 +31,7 @@ async def connect(api_key: str, totp_secret: str) -> dict:
     token = GrowwAPI.get_access_token(api_key=api_key, totp=totp)
     if not token:
         raise RuntimeError("Groww did not return access token")
-    expires = datetime.now(timezone.utc) + timedelta(days=1)
-    return {"access_token": token, "expires_at": expires}
+    return {"access_token": token, "expires_at": next_token_expiry()}
 
 
 def client(access_token: str):

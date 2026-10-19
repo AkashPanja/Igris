@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -16,10 +16,13 @@ from app.services.brokers import groww as groww_broker
 log = logging.getLogger("igris.scheduler")
 
 REAUTH_WINDOW_MINUTES = 5  # tolerate tick jitter around the scheduled time
+IST = timezone(timedelta(hours=5, minutes=30))
+GROWW_PROACTIVE_REFRESH_MINUTES = 30  # top up before the 06:00 IST death
 
 
 def _local_now() -> datetime:
-    return datetime.now().astimezone()
+    """Reauth scheduling is defined in IST (user-facing '07:30 AM' semantics)."""
+    return datetime.now(timezone.utc).astimezone(IST)
 
 
 async def _send_reauth_email(session, user: User, conn: Connection, reason: str) -> None:
@@ -64,9 +67,9 @@ async def _send_reauth_email(session, user: User, conn: Connection, reason: str)
         log.warning("reauth email failed for conn %s: %s", conn.id, exc)
 
 
-def _due_for_reauth(conn: Connection) -> bool:
-    """True when local time has passed today's reauth_time and we haven't run today."""
-    now = _local_now()
+def _due_for_reauth(conn: Connection, now: datetime | None = None) -> bool:
+    """True when IST time has passed today's reauth_time and we haven't run today."""
+    now = (now or datetime.now(timezone.utc)).astimezone(IST)
     scheduled = conn.reauth_time or settings.default_reauth_time
     try:
         hh, mm = scheduled.split(":")
@@ -75,7 +78,8 @@ def _due_for_reauth(conn: Connection) -> bool:
         return False
     last = conn.last_reauth_at
     if last is not None:
-        last_local = last.astimezone() if last.tzinfo else last.replace(tzinfo=timezone.utc).astimezone()
+        last = last if last.tzinfo else last.replace(tzinfo=timezone.utc)
+        last_local = last.astimezone(IST)
         if last_local.date() == now.date():
             return False
     # Don't fire before the scheduled time (allow small window after)
@@ -85,23 +89,35 @@ def _due_for_reauth(conn: Connection) -> bool:
 async def _reauth(session, conn: Connection, user: User) -> None:
     creds = svc.load_credentials(conn)
     if conn.provider == "groww":
-        try:
-            result = await groww_broker.connect(conn.app_id, creds.get("totp_secret", ""))
-        except Exception as exc:  # noqa: BLE001
-            conn.status = "error"
-            conn.last_error = str(exc)
-            await session.commit()
-            log.warning("groww auto-reauth failed for %s: %s", conn.id, exc)
-            await _send_reauth_email(session, user, conn, str(exc))
-            return
-        creds["access_token"] = result["access_token"]
-        svc.save_credentials(conn, creds)
-        conn.status = "connected"
-        conn.expires_at = result["expires_at"]
-        conn.last_error = ""
+        # TOTP login is silent. Verify the new token before trusting it, and
+        # retry once — a TOTP edge-of-window or transient blip shouldn't strand
+        # the connection in "error" all day.
+        last_error = ""
+        for attempt in range(2):
+            try:
+                result = await groww_broker.connect(conn.app_id, creds.get("totp_secret", ""))
+                creds["access_token"] = result["access_token"]
+                svc.save_credentials(conn, creds)
+                conn.expires_at = result["expires_at"]
+                ok, msg = await groww_broker.test_connection(result["access_token"])
+                if ok:
+                    conn.status = "connected"
+                    conn.last_error = ""
+                    conn.last_reauth_at = datetime.now(timezone.utc)
+                    await session.commit()
+                    log.info("groww auto-reauth ok for %s (expires %s)", conn.id, conn.expires_at)
+                    return
+                last_error = msg
+            except Exception as exc:  # noqa: BLE001
+                last_error = str(exc)
+            log.warning("groww auto-reauth attempt %s failed for %s: %s", attempt + 1, conn.id, last_error)
+        conn.status = "error"
+        conn.last_error = last_error
         conn.last_reauth_at = datetime.now(timezone.utc)
         await session.commit()
-        log.info("groww auto-reauth ok for %s", conn.id)
+        log.warning("groww auto-reauth failed for %s: %s", conn.id, last_error)
+        await _send_reauth_email(session, user, conn, last_error)
+        return
     else:  # fyers needs interactive OAuth — notify instead
         expires = conn.expires_at
         expired = expires is not None and expires <= datetime.now(timezone.utc)
@@ -185,28 +201,46 @@ async def tick() -> None:
             expires = conn.expires_at
             if expires is not None and expires.tzinfo is None:
                 expires = expires.replace(tzinfo=timezone.utc)
-            # Expire tracking (independent of reauth time)
-            if conn.status == "connected" and expires and expires <= now_utc:
-                conn.status = "needs_auth"
-                conn.last_error = "Access token expired — re-authorize"
-                await session.commit()
-                await _send_reauth_email(session, user, conn, "access token expired")
+            if conn.status == "connected":
+                token_dead = expires is not None and expires <= now_utc
+                top_up = (
+                    conn.provider == "groww" and expires is not None
+                    and 0 <= (expires - now_utc).total_seconds()
+                    <= GROWW_PROACTIVE_REFRESH_MINUTES * 60
+                )
+                if conn.provider == "groww":
+                    # Groww tokens die daily 06:00 IST — silently re-login on
+                    # death, near-death, or the scheduled reauth_time (IST).
+                    if token_dead or top_up or _due_for_reauth(conn, now_utc):
+                        await _reauth(session, conn, user)
+                    continue
+                if token_dead:
+                    conn.status = "needs_auth"
+                    conn.last_error = "Access token expired — re-authorize"
+                    await session.commit()
+                    await _send_reauth_email(session, user, conn, "access token expired")
+                    continue
+                if _due_for_reauth(conn, now_utc):
+                    await _reauth(session, conn, user)
                 continue
             if conn.status == "needs_auth":
-                # Groww can re-login silently (TOTP) — try once; failure flips it to
-                # "error" (excluded here) + emails the user. Fyers needs the OAuth
-                # click on the website, so just keep waiting.
+                # Groww recovers silently; Fyers waits for the OAuth click.
                 if conn.provider == "groww":
                     await _reauth(session, conn, user)
                 continue
-            if _due_for_reauth(conn):
-                await _reauth(session, conn, user)
     async with SessionLocal() as session:
         await _agent_tick(session)
 
 
 async def run_forever() -> None:
-    log.info("scheduler started (reauth default %s)", settings.default_reauth_time)
+    # route app logs to stderr so reauth OK/FAIL shows up in the live log
+    lg = logging.getLogger("igris")
+    if not lg.handlers:
+        h = logging.StreamHandler()
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+        lg.addHandler(h)
+        lg.setLevel(logging.INFO)
+    log.info("scheduler started (reauth default %s IST)", settings.default_reauth_time)
     while True:
         try:
             await tick()
