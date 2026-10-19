@@ -157,39 +157,52 @@ def _fyers_symbol(sym: str) -> str:
 
 
 def _parse_fyers_ticker(raw: str | None, fallback: str) -> str:
-    # "NSE:RELIANCE-EQ" -> "RELIANCE"
+    # "NSE:RELIANCE-EQ" -> "RELIANCE"; "NSE:NIFTY50-INDEX" -> "NIFTY50"
     if not raw:
         return fallback
     part = raw.split(":")[-1]
-    return part.removesuffix("-EQ").strip() or fallback
+    for suffix in ("-EQ", "-INDEX"):
+        part = part.removesuffix(suffix)
+    return part.strip() or fallback
 
 
 async def fetch_quotes(
     session: AsyncSession, user_id: int, symbols: list[str]
 ) -> dict[str, tuple[float, float | None]]:
-    """{symbol: (ltp, prev_close|None)} via Fyers batch then Groww per-symbol."""
+    """{symbol: (ltp, prev_close|None)} via Fyers batch then Groww per-symbol, then free NSE."""
     out: dict[str, tuple[float, float | None]] = {}
     if not symbols:
         return out
 
-    client, _ = trading._broker_client(session, user_id, "fyers")
-    if client is not None:
+    client, _ = await trading._broker_client(session, user_id, "fyers")
+    # map the exact Fyers symbol we requested back to the user's ticker
+    # (empty fyers symbols are skipped — those aren't on the Fyers masters)
+    sym_map = {f: s for s in symbols if (f := _fyers_symbol(s))} if client is not None else {}
+    if client is not None and sym_map:
         try:
-            resp = client.quotes({"symbols": ",".join(_fyers_symbol(s) for s in symbols)})
+            resp = client.quotes({"symbols": ",".join(sym_map)})
             if isinstance(resp, dict) and resp.get("s") == "ok":
                 for i, d in enumerate(resp.get("d") or []):
-                    if not isinstance(d, dict) or d.get("s") not in (None, "ok"):
+                    if not isinstance(d, dict):
                         continue
                     v = d.get("v") or {}
+                    # per-row errors sit in v.s even when the envelope says ok
+                    if v.get("s") == "error":
+                        log.debug("fyers quote row error: %s", v.get("errmsg"))
+                        continue
+                    if d.get("s") not in (None, "ok"):
+                        continue
                     lp = v.get("lp") or v.get("ltp")
                     if not lp:
                         continue
-                    prev = v.get("ep") or v.get("prev_close") or v.get("prevClosePrice")
-                    ticker = _parse_fyers_ticker(
-                        d.get("symbol") or v.get("symbol"),
-                        symbols[i] if i < len(symbols) else "",
+                    # Fyers v3 returns prev_close_price (docs response sample)
+                    prev = (v.get("prev_close_price") or v.get("ep")
+                            or v.get("prev_close") or v.get("prevClosePrice"))
+                    row_sym = d.get("n") or d.get("symbol") or v.get("symbol") or ""
+                    ticker = sym_map.get(str(row_sym)) or _parse_fyers_ticker(
+                        row_sym, symbols[i] if i < len(symbols) else "",
                     )
-                    if ticker in symbols:
+                    if ticker in symbols and ticker not in out:
                         try:
                             out[ticker] = (float(lp), float(prev) if prev else None)
                         except (TypeError, ValueError):
@@ -198,30 +211,33 @@ async def fetch_quotes(
             log.debug("fyers batch quotes failed: %s", exc)
 
     missing = [s for s in symbols if s not in out][:WATCHLIST_CAP]
-    if missing:
-        client, _ = trading._broker_client(session, user_id, "groww")
-        if client is not None:
-            for sym in missing:
-                if trading.is_index_symbol(sym):
-                    continue  # indices are not on Groww's CASH segment — skip
-                try:
-                    # Docs: get_quote(trading_symbol, exchange, segment) — segment is required
-                    resp = client.get_quote(trading_symbol=sym, exchange="NSE", segment="CASH")
-                    p = resp.get("payload") or resp.get("data") or {}
-                    ltp = p.get("ltp")
-                    if ltp:
-                        ohlc = p.get("ohlc") or {}
-                        prev = ohlc.get("close")
-                        out[sym] = (float(ltp), float(prev) if prev else None)
-                except Exception as exc:  # noqa: BLE001
-                    log.debug("groww quote %s failed: %s", sym, exc)
-            # free NSE for any index symbols that were skipped
-            for sym in missing:
-                if sym in out or not trading.is_index_symbol(sym):
-                    continue
-                px = trading.nse_index_ltp(sym)
-                if px is not None:
-                    out[sym] = (px, None)
+    groww = None
+    if any(not trading.is_index_symbol(s) for s in missing):
+        groww, _ = await trading._broker_client(session, user_id, "groww")
+    for sym in missing:
+        if trading.is_index_symbol(sym):
+            continue  # indices are not on Groww's CASH segment — NSE fallback below
+        if groww is None:
+            continue
+        try:
+            # Docs: get_quote(trading_symbol, exchange, segment) — segment is required
+            resp = groww.get_quote(trading_symbol=sym, exchange="NSE", segment="CASH")
+            p = resp.get("payload") or resp.get("data") or {}
+            ltp = p.get("ltp")
+            if ltp:
+                ohlc = p.get("ohlc") or {}
+                prev = ohlc.get("close")
+                out[sym] = (float(ltp), float(prev) if prev else None)
+        except Exception as exc:  # noqa: BLE001
+            log.debug("groww quote %s failed: %s", sym, exc)
+
+    # free NSE for index symbols no broker covered (runs even without a Groww connection)
+    for sym in missing:
+        if sym in out or not trading.is_index_symbol(sym):
+            continue
+        q = trading.nse_index_quote(sym)
+        if q:
+            out[sym] = q
     return out
 
 

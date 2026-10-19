@@ -259,74 +259,129 @@ async def _broker_client(session: AsyncSession, user_id: int, provider: str):
 
 
 # ------------------------------------------------------- broker symbol formats
-# Verified against official docs 2026-10-19:
-#   Fyers: equity "NSE:RELIANCE-EQ"; index "NSE:NIFTY50-INDEX";
-#          options monthly "NSE:NIFTY26OCT24000CE", weekly "NSE:NIFTY26102424000CE"
-#          (yy + 3-letter-mon monthly; yy+single-digit-month+dd weekly); futures "NSE:NIFTY26OCTFUT"
+# Verified against official docs + the Fyers symbol master (10,116 NSE instruments,
+# 2026-10-19):
+#   Fyers: equity "NSE:RELIANCE-EQ"; index "NSE:NIFTY50-INDEX" / "NSE:NIFTYBANK-INDEX"
+#          (Bank Nifty's Fyers ticker is NIFTYBANK, NOT BANKNIFTY); SENSEX is BSE.
+#          options monthly "NSE:NIFTY26OCT24000CE"; weekly "NSE:NIFTY26O0824000CE"
+#          (yy + 3-letter-mon monthly; weekly uses a 1-char month code:
+#           Jan-Sep = 1..9, Oct=O, Nov=N, Dec=D); futures "NSE:NIFTY26OCTFUT"
 #   Groww: trading_symbol for F&O monthly-style "NIFTY25OCT24000CE" / futures "NIFTY25OCTFUT";
 #          equity plain "RELIANCE"; segment CASH|FNO, product CNC|MIS|NRML
 
 _MON3 = ("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
-# Common NSE index aliases → canonical Fyers base name (without -INDEX)
-_INDEX_ALIASES = {
-    "NIFTY": "NIFTY50", "NIFTY50": "NIFTY50", "NIFTY 50": "NIFTY50", "NIFTY-50": "NIFTY50",
-    "BANKNIFTY": "BANKNIFTY", "NIFTY BANK": "BANKNIFTY", "NIFTYBANK": "BANKNIFTY",
-    "FINNIFTY": "FINNIFTY", "NIFTY FINANCIAL SERVICES": "FINNIFTY", "NIFTY FIN SERVICE": "FINNIFTY",
-    "MIDCPNIFTY": "MIDCPNIFTY", "NIFTY MIDCAP SELECT": "MIDCPNIFTY",
-    "NIFTY IT": "NIFTYIT", "NIFTYIT": "NIFTYIT",
-    "INDIA VIX": "INDIAVIX", "INDIAVIX": "INDIAVIX", "VIX": "INDIAVIX",
-    "SENSEX": "SENSEX", "BANKEX": "BANKEX",
-    "GIFT NIFTY": "GIFTNIFTY", "GIFTNIFTY": "GIFTNIFTY", "NIFTY SGX": "GIFTNIFTY",
+# Fyers weekly option month codes: 1..9 for Jan..Sep, letters for the last three
+_WEEK_MON = {1: "1", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7", 8: "8", 9: "9",
+             10: "O", 11: "N", 12: "D"}
+
+# alias (upper) -> (Fyers spot symbol or None, NSE allIndices display name or None)
+# None Fyers symbol = not on the Fyers masters (use the free NSE feed instead)
+# None display name = not in NSE's allIndices feed (BSE indices / GIFT NIFTY special case)
+_INDEX_INFO: dict[str, tuple[str | None, str | None]] = {
+    "NIFTY": ("NSE:NIFTY50-INDEX", "NIFTY 50"),
+    "NIFTY50": ("NSE:NIFTY50-INDEX", "NIFTY 50"),
+    "NIFTY 50": ("NSE:NIFTY50-INDEX", "NIFTY 50"),
+    "NIFTY-50": ("NSE:NIFTY50-INDEX", "NIFTY 50"),
+    "BANKNIFTY": ("NSE:NIFTYBANK-INDEX", "NIFTY BANK"),
+    "NIFTYBANK": ("NSE:NIFTYBANK-INDEX", "NIFTY BANK"),
+    "NIFTY BANK": ("NSE:NIFTYBANK-INDEX", "NIFTY BANK"),
+    "FINNIFTY": ("NSE:FINNIFTY-INDEX", "NIFTY FINANCIAL SERVICES"),
+    "NIFTY FINANCIAL SERVICES": ("NSE:FINNIFTY-INDEX", "NIFTY FINANCIAL SERVICES"),
+    "MIDCPNIFTY": ("NSE:MIDCPNIFTY-INDEX", "NIFTY MIDCAP SELECT"),
+    "NIFTY MIDCAP SELECT": ("NSE:MIDCPNIFTY-INDEX", "NIFTY MIDCAP SELECT"),
+    "NIFTY IT": ("NSE:NIFTYIT-INDEX", "NIFTY IT"),
+    "NIFTYIT": ("NSE:NIFTYIT-INDEX", "NIFTY IT"),
+    "INDIA VIX": ("NSE:INDIAVIX-INDEX", "INDIA VIX"),
+    "INDIAVIX": ("NSE:INDIAVIX-INDEX", "INDIA VIX"),
+    "VIX": ("NSE:INDIAVIX-INDEX", "INDIA VIX"),
+    "SENSEX": ("BSE:SENSEX-INDEX", None),      # BSE index — absent from NSE allIndices
+    "BANKEX": ("BSE:BANKEX-INDEX", None),
+    "GIFT NIFTY": (None, None),                # not on Fyers masters; marketStatus.giftnifty
+    "GIFTNIFTY": (None, None),
+    "NIFTY SGX": (None, None),
 }
+_GIFT_ALIASES = ("GIFT NIFTY", "GIFTNIFTY", "NIFTY SGX")
 
 
 def is_index_symbol(sym: str) -> bool:
-    return (sym or "").strip().upper() in _INDEX_ALIASES
+    return (sym or "").strip().upper() in _INDEX_INFO
+
+
+def _symbol_suggestions(sym: str, limit: int = 3) -> list[str]:
+    """'Did you mean' ticker list from the Fyers symbol master (best effort)."""
+    try:
+        from app.services.brokers.fyers_symbols import suggest
+
+        return suggest(sym, limit=limit)
+    except Exception:  # noqa: BLE001 — suggestions must never break quoting
+        return []
 
 
 def fyers_spot_symbol(sym: str) -> str:
-    """Map a bare ticker/index to Fyers spot symbol format."""
+    """Map a bare ticker/index to the exact Fyers spot symbol.
+
+    Returns "" when we know the symbol is absent from the Fyers masters
+    (e.g. GIFT NIFTY) so callers can skip Fyers instead of issuing -300 calls.
+    """
     key = (sym or "").strip().upper()
     if ":" in key:
         return key
-    idx = _INDEX_ALIASES.get(key)
-    if idx:
-        return f"NSE:{idx}-INDEX"
+    info = _INDEX_INFO.get(key)
+    if info is not None:
+        return info[0] or ""
     return f"NSE:{key}-EQ"
 
 
-def nse_index_ltp(sym: str) -> float | None:
-    """Free NSE index LTP (works from this server IP). Returns None on miss/fail."""
+def nse_index_quote(sym: str) -> tuple[float, float | None] | None:
+    """Free NSE index (ltp, prev_close|None). prev derived from variation/DAYCHANGE."""
     key = (sym or "").strip().upper()
-    canon = _INDEX_ALIASES.get(key)
-    if not canon:
+    info = _INDEX_INFO.get(key)
+    if info is None:
         return None
+    _, disp = info
     try:
         from nsepython import nsefetch
 
-        data = nsefetch("https://www.nseindia.com/api/allIndices")
-        rows = (data or {}).get("data") or []
-        # canonical → the NSE "index" display name(s)
-        want = {
-            "NIFTY50": "NIFTY 50", "BANKNIFTY": "NIFTY BANK", "FINNIFTY": "NIFTY FINANCIAL SERVICES",
-            "MIDCPNIFTY": "NIFTY MIDCAP SELECT", "NIFTYIT": "NIFTY IT", "INDIAVIX": "INDIA VIX",
-            "SENSEX": "SENSEX", "BANKEX": "BANKEX",
-        }.get(canon, canon)
-        for r in rows:
-            if (r.get("index") or "").upper() == want.upper():
-                ltp = r.get("last")
-                if ltp:
-                    return float(ltp)
-        # GIFT NIFTY isn't in allIndices — it's under marketStatus.giftnifty (LASTPRICE key)
-        if canon == "GIFTNIFTY":
+        if disp:
+            data = nsefetch("https://www.nseindia.com/api/allIndices")
+            rows = (data or {}).get("data") or []
+            for r in rows:
+                if (r.get("index") or "").upper() == disp.upper():
+                    ltp = r.get("last")
+                    if not ltp:
+                        continue
+                    last = float(ltp)
+                    prev = None
+                    try:
+                        var = r.get("variation")
+                        if var not in (None, ""):
+                            prev = last - float(var)  # variation = change vs prev close
+                    except (TypeError, ValueError):
+                        prev = None
+                    return last, prev
+        # GIFT NIFTY isn't in allIndices — it's under marketStatus.giftnifty (LASTPRICE/DAYCHANGE)
+        if key in _GIFT_ALIASES:
             ms = nsefetch("https://www.nseindia.com/api/marketStatus")
             g = (ms or {}).get("giftnifty") or {}
             ltp = g.get("LASTPRICE") or g.get("last") or g.get("latest")
             if ltp:
-                return float(ltp)
+                last = float(ltp)
+                prev = None
+                try:
+                    if g.get("DAYCHANGE") not in (None, ""):
+                        prev = last - float(g["DAYCHANGE"])
+                except (TypeError, ValueError):
+                    prev = None
+                return last, prev
     except Exception:  # noqa: BLE001
         return None
     return None
+
+
+def nse_index_ltp(sym: str) -> float | None:
+    """Free NSE index LTP (works from this server IP). Returns None on miss/fail."""
+    q = nse_index_quote(sym)
+    return q[0] if q else None
 
 
 def _parse_expiry(expiry: str) -> datetime | None:
@@ -370,7 +425,8 @@ def fyers_contract_symbol(underlying: str, instrument: str, expiry: str, raw_str
     strike, ot = _split_strike_ot(raw_strike)
     if not strike or not ot:
         return fyers_spot_symbol(underlying)  # can't build a contract without strike+CE/PE
-    token = f"{yy}{mon}" if _is_monthly_expiry(d) else f"{yy}{d.month}{d.day:02d}"
+    # weekly uses a 1-char month code (Jan-Sep=1..9, Oct=O, Nov=N, Dec=D)
+    token = f"{yy}{mon}" if _is_monthly_expiry(d) else f"{yy}{_WEEK_MON[d.month]}{d.day:02d}"
     return f"NSE:{underlying}{token}{strike}{ot}"
 
 
@@ -412,22 +468,34 @@ async def get_quote(session: AsyncSession, user_id: int, symbol: str) -> tuple[f
     # ---- Fyers (docs: symbols like "NSE:RELIANCE-EQ" / "NSE:NIFTY50-INDEX")
     fyers_sym = fyers_spot_symbol(sym)
     client, err = await _broker_client(session, user_id, "fyers")
-    if client is not None:
+    if client is None:
+        reasons.append(err or "fyers unavailable")
+    elif not fyers_sym:
+        reasons.append("fyers: not listed on Fyers masters (using free NSE feed)")
+    else:
         try:
             resp = client.quotes({"symbols": fyers_sym})
             if isinstance(resp, dict) and resp.get("s") == "ok":
                 d = (resp.get("d") or [{}])[0]
                 v = d.get("v") or {}
-                ltp = v.get("lp") or v.get("ltp")
-                if ltp:
-                    return float(ltp), "fyers"
-                reasons.append("fyers: empty LTP")
+                # per-row errors live in v.s/v.errmsg even when the envelope says ok
+                if v.get("s") == "error":
+                    msg = v.get("errmsg") or "invalid symbol"
+                    reason = f"fyers: {msg}" + (f" ({v.get('code')})" if v.get("code") else "")
+                    if "valid symbol" in msg.lower():
+                        hints = _symbol_suggestions(sym)
+                        if hints:
+                            reason += f" · did you mean {', '.join(hints)}?"
+                    reasons.append(reason)
+                else:
+                    ltp = v.get("lp") or v.get("ltp")
+                    if ltp:
+                        return float(ltp), "fyers"
+                    reasons.append("fyers: empty LTP")
             else:
                 reasons.append(f"fyers: {(resp or {}).get('message', 'error') if isinstance(resp, dict) else 'error'}")
         except Exception as exc:  # noqa: BLE001
             reasons.append(f"fyers: {exc}")
-    else:
-        reasons.append(err or "fyers unavailable")
 
     # ---- Groww (docs: get_quote(trading_symbol, exchange, segment); CASH only —
     #      indices are not served on the CASH segment)
@@ -543,11 +611,17 @@ async def get_option_chain(
         raw_g = ""
 
     # ---- Fyers: optionchain({"symbol": "NSE:NIFTY50-INDEX", "strikecount": n, ...})
+    fym = fyers_spot_symbol(sym)
+    raw_f = ""
     client, err = await _broker_client(session, user_id, "fyers")
-    if client is not None:
+    if client is None:
+        reasons.append(err or "fyers unavailable")
+    elif not fym:
+        reasons.append("fyers: not listed on Fyers masters")
+    else:
         try:
             data: dict[str, Any] = {
-                "symbol": fyers_spot_symbol(sym),
+                "symbol": fym,
                 "strikecount": 11,
                 "timestamp": "",
                 "greeks": 1,
@@ -564,9 +638,6 @@ async def get_option_chain(
         except Exception as exc:  # noqa: BLE001
             reasons.append(f"fyers: {exc}")
             raw_f = ""
-    else:
-        reasons.append(err or "fyers unavailable")
-        raw_f = ""
 
     return {
         "error": " · ".join(reasons) or "no chain source",
@@ -612,12 +683,15 @@ async def place_broker_order(
         except Exception as exc:  # noqa: BLE001
             return False, f"groww: {exc}"
     client, err = await _broker_client(session, user_id, "fyers")
+    f_symbol = fyers_contract_symbol(trade.symbol, trade.instrument, trade.expiry, trade.strike)
+    if client is not None and not f_symbol:
+        return False, f"fyers: no tradable symbol for {trade.symbol} (not on Fyers masters)"
     if client is not None:
         try:
             # Docs: symbol must be Fyers format; type 1=market; side ±1; productType
             # CNC (delivery) / INTRADAY; validity DAY; F&O uses the contract symbol.
             data = {
-                "symbol": fyers_contract_symbol(trade.symbol, trade.instrument, trade.expiry, trade.strike),
+                "symbol": f_symbol,
                 "qty": int(trade.qty),
                 "type": 1,  # market
                 "side": 1 if trade.side == "BUY" else -1,

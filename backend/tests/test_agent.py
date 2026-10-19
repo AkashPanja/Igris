@@ -454,12 +454,19 @@ class TestBrokerFormats:
         assert tr.fyers_spot_symbol("NSE:TNPO-EQ") == "NSE:TNPO-EQ"
         assert tr.fyers_spot_symbol("NIFTY") == "NSE:NIFTY50-INDEX"
         assert tr.fyers_spot_symbol("NIFTY 50") == "NSE:NIFTY50-INDEX"
+        # Fyers ticker for Bank Nifty is NIFTYBANK (not BANKNIFTY); Sensex lives on BSE
+        assert tr.fyers_spot_symbol("BANKNIFTY") == "NSE:NIFTYBANK-INDEX"
+        assert tr.fyers_spot_symbol("SENSEX") == "BSE:SENSEX-INDEX"
+        # GIFT NIFTY is absent from the Fyers masters → "" so callers skip Fyers
+        assert tr.fyers_spot_symbol("GIFT NIFTY") == ""
         assert tr.is_index_symbol("NIFTY") and not tr.is_index_symbol("TNPO")
 
         # monthly expiry (2026-10-29 is the last Thursday of Oct 2026)
         assert tr.fyers_contract_symbol("NIFTY", "options", "2026-10-29", "24000CE") == "NSE:NIFTY26OCT24000CE"
-        # weekly expiry (2026-10-08 is a Thursday but not the last)
-        assert tr.fyers_contract_symbol("NIFTY", "options", "2026-10-08", "24000CE") == "NSE:NIFTY26100824000CE"
+        # weekly expiry (2026-10-08, not month end) — Oct uses the letter code "O"
+        assert tr.fyers_contract_symbol("NIFTY", "options", "2026-10-08", "24000CE") == "NSE:NIFTY26O0824000CE"
+        # weekly in a numeric month (2026-09-25)
+        assert tr.fyers_contract_symbol("NIFTY", "options", "2026-09-25", "25000PE") == "NSE:NIFTY2692525000PE"
         assert tr.fyers_contract_symbol("NIFTY", "futures", "2026-10-29") == "NSE:NIFTY26OCTFUT"
         # Groww monthly-style
         assert tr.groww_contract_symbol("NIFTY", "options", "2026-10-29", "24000PE") == "NIFTY26OCT24000PE"
@@ -592,3 +599,54 @@ class TestBrokerFormats:
             assert seen["product"] == "NRML"  # F&O must be NRML, not CNC
             assert seen["trading_symbol"] == "NIFTY26OCT24000CE"  # contract symbol, not bare NIFTY
             assert seen["exchange"] == "NSE" and seen["order_type"] == "MARKET"
+
+    async def test_tc087_symbol_master_suggestions_and_error_surface(self, client, monkeypatch):
+        """Canned master: fuzzy ranking must beat naive substring matching.
+
+        Regression: plain substring search matched "TNPO" inside "RTNPOWER"
+        instead of the real NSE ticker "TNPETRO"; and get_quote hid the Fyers
+        -300 message inside a nested payload (reported only "empty LTP").
+        """
+        import app.services.agent.trading as tr
+        from sqlalchemy import select
+
+        from app.models import User
+
+        canned = {
+            "NSE:TNPETRO-EQ": {"symTicker": "NSE:TNPETRO-EQ", "exSymName": "TAMILNADU PETROPRODUCTS L"},
+            "NSE:RTNPOWER-EQ": {"symTicker": "NSE:RTNPOWER-EQ", "exSymName": "RATTANPOWER"},
+            "NSE:RELIANCE-EQ": {"symTicker": "NSE:RELIANCE-EQ", "exSymName": "RELIANCE INDUSTRIES"},
+            "NSE:NIFTY50-INDEX": {"symTicker": "NSE:NIFTY50-INDEX", "exSymName": "NIFTY"},
+        }
+
+        import app.services.brokers.fyers_symbols as fs
+
+        monkeypatch.setattr(fs, "load_master", lambda m: canned)
+
+        hits = fs.suggest("TNPO")
+        assert "TNPETRO" in hits
+        assert "RTNPOWER" not in hits  # same-first-letter prefilter drops it (R ≠ T)
+        assert fs.suggest("RELIAN")[:1] == ["RELIANCE"]
+        assert fs.suggest("") == []
+        assert fs.suggest("ZZQQXX") == []  # nothing similar → no bogus guesses
+
+        class FakeFyers:
+            def quotes(self, data):
+                return {"s": "ok", "d": [{
+                    "n": data["symbols"],
+                    "v": {"s": "error", "errmsg": "Please provide a valid symbol", "code": -300},
+                    "s": "ok",
+                }]}
+
+        async def fake_client(sess, uid, provider):
+            return (FakeFyers(), None) if provider == "fyers" else (None, "no groww")
+
+        monkeypatch.setattr(tr, "_broker_client", fake_client)
+        monkeypatch.setattr(tr, "nse_index_ltp", lambda s: None)
+
+        await _complete_setup(client)
+        async with SessionLocal() as session:
+            uid = (await session.execute(select(User))).scalars().first().id
+            px, via = await tr.get_quote(session, uid, "TNPO")
+        assert px is None
+        assert "valid symbol" in via and "TNPETRO" in via  # error surfaced + hint
